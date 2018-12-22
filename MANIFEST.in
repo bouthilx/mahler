@@ -1,0 +1,2 @@
+include versioneer.py
+include src/mahler/core/_version.py
