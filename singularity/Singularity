@@ -13,8 +13,6 @@ From: ubuntu:18.04
     AUTHOR xavier.bouthillier@umontreal.ca
 
 %post
-    export CUDA_VISIBLE_DEVICES=''
-
     echo "------------------------------------------------------"
     echo "Installing Python 3.6"
     echo "------------------------------------------------------"
