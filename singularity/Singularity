@@ -23,7 +23,7 @@ From: ubuntu:18.04
     echo "------------------------------------------------------"
     echo "Installing Mahler"
     echo "------------------------------------------------------"
-    pip install git+https://github.com/bouthilx/mahler.git
+    pip3 install git+https://github.com/bouthilx/mahler.git
 
     echo "------------------------------------------------------"
     echo "Cleaning up"
