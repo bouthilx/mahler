@@ -18,6 +18,8 @@ tests_require = [
 
 packages = [
     'mahler.core',
+    'mahler.cli',
+    'mahler.client'
     ]
 
 
@@ -41,7 +43,18 @@ setup_args = dict(
     entry_points={
         'console_scripts': [
             'mahler = mahler.cli.main:main'
-        ]
+        ],
+        'RegistryDB': [
+        ],
+        'Scheduler': [
+        ],
+        'Dashboard': [
+        ],
+        'cli': [
+            'schedule = mahler.cli.schedule:build',
+            'worker = mahler.cli.worker:build',
+            'dashboard = mahler.cli.dashboard:build'
+        ],
     },
     # "Zipped eggs don't play nicely with namespace packaging"
     # from https://github.com/pypa/sample-namespace-packages
