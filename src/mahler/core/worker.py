@@ -1,16 +1,99 @@
+import datetime
+import io
+import logging
+import time
+import sys
+import traceback
+
+import mahler.core.registrar
+import mahler.core.utils.errors
+
+logger = logging.getLogger('mahler.core.worker')
 
 
-def main():
-    technician.maintain(registrar)
-    dispatcher = Dispatcher()
-    experiments = list(technician.query(registrar))
+STOPPING_TEMPLATE = '---\nStopping execution: {}\n---\n'
+STARTING_TEMPLATE = '---\nStarting execution: {}\n---\n'
 
-    trial_extension_patience = 10
+def sigterm_handler():
+    if sigterm_handler.triggered:
+        return
+    else:
+        sigterm_handler.triggered = True
+
+    raise mahler.core.utils.errors.SignalInterrupt("Task killed by SIGTERM")
+
+
+sigterm_handler.triggered = False
+
+
+def execute(registrar, state, task):
+    stdout = io.StringIO()
+    stderr = io.StringIO()
+
+    utcnow = datetime.datetime.utcnow()
+    stdout.write(STARTING_TEMPLATE.format(utcnow))
+    stderr.write(STARTING_TEMPLATE.format(utcnow))
+
+    try:
+        logger.info('Starting execution')
+        data, volume = task.run(state, stdout=stdout, stderr=stderr)
+        logger.info('Execution completed')
+        logger.debug('Saving output')
+        registrar.set_output(task, data)
+        logger.debug('Output saved')
+        status = mahler.core.status.Completed('')
+
+    except mahler.core.utils.errors.SignalCancel as e:
+        status = mahler.core.status.Cancelled('Cancelled by user')
+
+    except mahler.core.utils.errors.SignalInterrupt as e:
+        status = mahler.core.status.Interrupted('Interrupted by system (SIGTERM)')
+
+    except KeyboardInterrupt as e:
+        status = mahler.core.status.Suspended('Suspended by user (KeyboardInterrupt)')
+
+    except BaseException as e:
+        # broken
+        message = "execution error: {}".format(e)
+        logger.info(message)
+        stderr.write(traceback.format_exc())
+        status = mahler.core.status.Broken(str(e))
+        # status = mahler.core.status.FailedOver(str(e))
+
+    finally:
+        utcnow = datetime.datetime.utcnow()
+        stdout.write(STOPPING_TEMPLATE.format(utcnow))
+        stderr.write(STOPPING_TEMPLATE.format(utcnow))
+        logger.debug(stdout.getvalue())
+        logger.debug(stderr.getvalue())
+        if stdout.getvalue():
+            task._stdout.refresh()
+            registrar.update_stdout(task, stdout.getvalue())
+        if stderr.getvalue():
+            task._stderr.refresh()
+            registrar.update_stderr(task, stderr.getvalue())
+
+    # TODO
+    # NOTE: storage.write adds volume links to the registry.
+    #       storage.write(registrar, volume)
+    # registrar.set_volume(task, volume)
+
+    return status
+
+
+def main(tags=tuple(), max_tasks=10e10, depletion_patience=12, exhaust_wait_time=10,
+         max_maintain=10):
+    # TODO: Support config
+    registrar = mahler.core.registrar.build(name='mongodb')
+    dispatcher = Dispatcher(registrar)
+    # tasks = list(technician.query(registrar))
+
+    exhaust_failures = 0
 
     state = State()
 
-    for i in range(options.max_tasks):
-        if not task_extension_patience:
+    for i in range(int(max_tasks)):
+        if exhaust_failures >= depletion_patience:
             print("Patience exhausted and no more task available.")
             break
 
@@ -19,18 +102,24 @@ def main():
             #       being used. Cannot pick trials which should be executed in a different
             #       container.
 
-            # NOTE: Should the container be defined at the Study level? We don't want to mix
-            #       different versions in the same study, but at the same time it is very likely
-            #       that we may want to add other tasks later on for analysis, which requires
-            #       different containers...
-
             # NOTE: Dispatcher should turn the task-document into an engine task,
             #       loading the volume at the same time
-            task = dispatcher.pick(tasks, registrar)
+            task = dispatcher.pick(tags, state)  # tasks, registrar)
+            exhaust_failures = 0
         except RuntimeError:
-            technician.maintain(registrar)
-            experiments = list(technician.query(registrar))
-            trial_extension_patience -= 1
+            logger.info('Dispatcher could not pick any task for execution.')
+            # NOTE: Maintainance could be done in parallel while a task is being executed.
+            updated = registrar.maintain(tags, limit=max_maintain)
+            if updated:
+                logger.info("{} task status updated and now queued".format(updated))
+                continue
+
+            exhaust_failures += 1
+            print("{} (UTC): No more task available, waiting {} seconds before "
+                  "trying again. {} attemps remaining.".format(
+                      datetime.datetime.utcnow(), exhaust_wait_time,
+                      depletion_patience - exhaust_failures))
+            time.sleep(exhaust_wait_time)
             continue
 
         # set status of trial as running
@@ -61,14 +150,28 @@ def main():
         # NOTE: What gets out of restore() is set in `state`
         # NOTE: Checkpoint should be object specific, so that we can easily map
         #       {volume-name: {'file': file-like, 'object': object}}
-        data, volume, subtasks = task.run(state)
-        # NOTE: storage.write adds volume links to the registry.
-        #       storage.write(registrar, volume)
-        worker.register(task, data, volume)
 
-        # NOTE: Users must configure registry and storage plugin.
+        # TODO: Add heartbeat for reserved and running
+        print('Executing task: {}'.format(task.id))
+        assert task.status.name == 'Reserved'
+        registrar.update_status(task, mahler.core.status.Running('start execution'))
+        try:
+            new_status = execute(registrar, state, task)
+        except BaseException as e:
+            message = "system error: {}".format(e)
+            registrar.update_status(task, mahler.core.status.Broken(message))
+            registrar.update_status(task, mahler.core.status.FailedOver('system error'))
+            raise
 
-        registrar.mark_completed(task.document)
+        registrar.update_status(task, new_status)
+        print('Executing of task {} stopped'.format(task.id))
+        print('New status: {}'.format(new_status))
+
+        if isinstance(new_status, mahler.core.status.Broken):
+            broke_n_times = sum(int(event['item']['name'] == new_status.name)
+                                for event in task._status.history)
+            registrar.update_status(
+                task, mahler.core.status.FailedOver('Broke {} times'.format(broke_n_times)))
 
         # Use an interface with Kleio to fetch data and save it in lab's db.
         # Could be sacred, comet.ml or WandB...
@@ -145,6 +248,7 @@ class Worker(object):
         # create new task for the restore
         # execute it
         # execute 
+        pass
 
     def register(self, task, data, volume):
         # TODO: if registering fails, set run as broken and rollback state.
@@ -168,4 +272,19 @@ class Worker(object):
 
 
 class Dispatcher(object):
-    pass
+    def __init__(self, registrar):
+        self.registrar = registrar
+
+    def pick(self, tags, state):
+        tasks = self.registrar.retrieve_tasks(tags, status=mahler.core.status.Queued(''))
+        # TODO: Sort by priority
+        # TODO: Pick tasks based on what is available in state (needs dependencies implementation)
+        for task in tasks:
+            try:
+                self.registrar.reserve(task)
+                return task
+            except (ValueError, mahler.core.registrar.RaceCondition) as e:
+                logger.info('Task {} reserved by concurrent worker'.format(task.id))
+                continue
+
+        raise RuntimeError("No task available")
