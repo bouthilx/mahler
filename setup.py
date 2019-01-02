@@ -10,25 +10,6 @@ from setuptools import setup
 import versioneer
 
 repo_root = os.path.dirname(os.path.abspath(__file__))
-mpath = os.path.join(repo_root, 'src')
-sys.path.insert(0, mpath)
-
-import mahler.core as mahler
-
-
-def find_data_files():
-    """Find Mahler configuration and metadata files."""
-    install_config_path = os.path.join(mahler.DIRS.site_data_dir, 'config')
-    config_path = os.path.join('config', '*')
-    configs = [cfg for cfg in iglob(config_path) if os.path.isfile(cfg)]
-
-    data_files = [
-        (install_config_path, configs),
-        (mahler.DIRS.site_data_dir, ['LICENSE', 'README.rst']),
-    ]
-
-    return data_files
-
 
 tests_require = [
     'pytest>=3.0.0'
@@ -53,7 +34,6 @@ setup_args = dict(
     packages=packages,
     package_dir={'': 'src'},
     include_package_data=True,
-    data_files=find_data_files(),
     install_requires=['PyYAML', 'appdirs'],
     tests_require=tests_require,
     setup_requires=['setuptools', 'appdirs', 'pytest-runner>=2.0,<3dev'],
