@@ -23,6 +23,7 @@ From: ubuntu:18.04
     echo "------------------------------------------------------"
     echo "Installing Mahler"
     echo "------------------------------------------------------"
+    pip3 install 'setuptools>=v40.1.0'
     pip3 install git+https://github.com/bouthilx/mahler.git
 
     echo "------------------------------------------------------"
