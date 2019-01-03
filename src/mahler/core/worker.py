@@ -1,6 +1,8 @@
+import contextlib
 import datetime
 import io
 import logging
+import os
 import time
 import sys
 import traceback
@@ -24,6 +26,17 @@ def sigterm_handler():
 
 
 sigterm_handler.triggered = False
+
+
+@contextlib.contextmanager
+def tmp_directory(working_dir=None):
+    curdir= os.getcwd()
+    try:
+        if working_dir is not None:
+            os.chdir(working_dir)
+        yield
+    finally:
+        os.chdir(curdir)
 
 
 def execute(registrar, state, task):
@@ -81,8 +94,16 @@ def execute(registrar, state, task):
     return status
 
 
-def main(tags=tuple(), max_tasks=10e10, depletion_patience=12, exhaust_wait_time=10,
-         max_maintain=10):
+def main(tags=tuple(), working_dir=None, max_tasks=10e10, depletion_patience=12,
+         exhaust_wait_time=10, max_maintain=10, **kwargs):
+
+    with tmp_directory(working_dir):
+        _main(tags=tags, max_tasks=max_tasks, depletion_patience=depletion_patience,
+              exhaust_wait_time=exhaust_wait_time, max_maintain=max_maintain)
+
+
+def _main(tags=tuple(), max_tasks=10e10, depletion_patience=12,
+          exhaust_wait_time=10, max_maintain=10):
     # TODO: Support config
     registrar = mahler.core.registrar.build(name='mongodb')
     dispatcher = Dispatcher(registrar)
