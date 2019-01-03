@@ -42,8 +42,8 @@ def load_modules_parser(main_parser):
 
 
 def main(args):
-    registrar = mahler.core.registrar.build(name=args.get('registrar', 'mongodb'))
-    ressources = mahler.core.resources.build(name=args['scheduler'], **args)
+    registrar = mahler.core.registrar.build()
+    ressources = mahler.core.resources.build(type=args['scheduler'], **args)
     tags = ['examples', 'random', 'flow', 'v1.0']
     registrar.maintain(tags)
     tasks = registrar.retrieve_tasks(tags, status=mahler.core.status.Queued(''))
