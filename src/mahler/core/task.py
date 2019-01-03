@@ -53,13 +53,13 @@ class Task(object):
     Aggressive update schemes for up-to-date views should be used sparingly.
     """
 
-    def __init__(self, op, arguments, id=None, name=None, registrar=None):
+    def __init__(self, op, arguments, id=None, name=None, registrar=None, container=None):
         self.op = op
         self._arguments = arguments
         self._name = name
         self._parent = None
         self._dependencies = []
-        self._container = None
+        self._container = container
         self._ressources = {}
         self.id = id
         self._priority = EventBasedItemAttribute(self, 'priority')

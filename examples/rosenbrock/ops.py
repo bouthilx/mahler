@@ -10,7 +10,7 @@ logger = logging.getLogger('ops')
 mahler = Client()
 
 
-tags = ['examples', 'rosenbrock', 'random', 'v1.1']
+tags = ['examples', 'rosenbrock', 'random', 'v1.4']
 
 
 space_keys = 'xyz'
@@ -42,7 +42,7 @@ def run(x, y, z):
 
 
 @mahler.operator()
-def create_trial():
+def create_trial(container=None):
     logger.info('Get trials')
     trials = list(mahler.find(tags + [run.name]))
     logger.info('There is {} trials'.format(len(trials)))
@@ -54,10 +54,10 @@ def create_trial():
         logger.info('Sampling')
         params = dict(zip(space_keys, (sample() for key in space_keys)))
         logger.info('Registering new run')
-        trial_execution = mahler.register(run.delay(**params), tags=tags)
+        trial_execution = mahler.register(run.delay(**params), tags=tags, container=container)
 
     for i in range(10):
         logger.info('Registering new create_trial')
-        mahler.register(create_trial.delay(), tags=tags)
+        mahler.register(create_trial.delay(container=container), tags=tags, container=container)
 
     return {}, {}

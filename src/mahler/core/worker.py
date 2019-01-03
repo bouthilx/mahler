@@ -94,15 +94,16 @@ def execute(registrar, state, task):
     return status
 
 
-def main(tags=tuple(), working_dir=None, max_tasks=10e10, depletion_patience=12,
+def main(tags=tuple(), container=None, working_dir=None, max_tasks=10e10, depletion_patience=12,
          exhaust_wait_time=10, max_maintain=10, **kwargs):
 
     with tmp_directory(working_dir):
-        _main(tags=tags, max_tasks=max_tasks, depletion_patience=depletion_patience,
-              exhaust_wait_time=exhaust_wait_time, max_maintain=max_maintain)
+        _main(tags=tags, container=container, max_tasks=max_tasks,
+              depletion_patience=depletion_patience, exhaust_wait_time=exhaust_wait_time,
+              max_maintain=max_maintain)
 
 
-def _main(tags=tuple(), max_tasks=10e10, depletion_patience=12,
+def _main(tags=tuple(), container=None, max_tasks=10e10, depletion_patience=12,
           exhaust_wait_time=10, max_maintain=10):
     # TODO: Support config
     registrar = mahler.core.registrar.build(name='mongodb')
@@ -125,12 +126,12 @@ def _main(tags=tuple(), max_tasks=10e10, depletion_patience=12,
 
             # NOTE: Dispatcher should turn the task-document into an engine task,
             #       loading the volume at the same time
-            task = dispatcher.pick(tags, state)  # tasks, registrar)
+            task = dispatcher.pick(tags, container, state)  # tasks, registrar)
             exhaust_failures = 0
         except RuntimeError:
             logger.info('Dispatcher could not pick any task for execution.')
             # NOTE: Maintainance could be done in parallel while a task is being executed.
-            updated = registrar.maintain(tags, limit=max_maintain)
+            updated = registrar.maintain(tags, container, limit=max_maintain)
             if updated:
                 logger.info("{} task status updated and now queued".format(updated))
                 continue
@@ -296,8 +297,10 @@ class Dispatcher(object):
     def __init__(self, registrar):
         self.registrar = registrar
 
-    def pick(self, tags, state):
-        tasks = self.registrar.retrieve_tasks(tags, status=mahler.core.status.Queued(''))
+    def pick(self, tags, container, state):
+        tasks = self.registrar.retrieve_tasks(
+            tags, container=container,
+            status=mahler.core.status.Queued(''))
         # TODO: Sort by priority
         # TODO: Pick tasks based on what is available in state (needs dependencies implementation)
         for task in tasks:

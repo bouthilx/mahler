@@ -28,7 +28,7 @@ class RegistrarDB(object):
     def register_task(self, task):
         raise NotImplemented()
     
-    def retrieve_tasks(self, tags, status=None):
+    def retrieve_tasks(self, tags, container=None, status=None):
         raise NotImplemented()
 
     def add_event(self, event_type, event_object):
@@ -72,7 +72,7 @@ class Registrar(object):
     def retrieve_volumes(self, task):
         raise NotImplemented()
 
-    def maintain(self, tags, limit=10e10):
+    def maintain(self, tags, container=None, limit=10e10):
         """
             1. check for onhold that can be queued
             2. check for interrupted that can be queued
@@ -80,15 +80,16 @@ class Registrar(object):
             4. check for switched-over that can be queued
             5. check for lost tasks that can be failed-over
         """
-        updated = self.maintain_onhold(tags, limit=limit)
-        updated += self.maintain_to_queue(tags, limit=limit - updated)
-        updated += self.maintain_lost(tags, limit=limit - updated)
+        updated = self.maintain_onhold(tags, container, limit=limit)
+        updated += self.maintain_to_queue(tags, container, limit=limit - updated)
+        updated += self.maintain_lost(tags, container, limit=limit - updated)
 
         return updated
 
-    def maintain_onhold(self, tags, limit=10e10):
+    def maintain_onhold(self, tags, container=None, limit=10e10):
         updated = 0
-        for task in self.retrieve_tasks(tags, status=mahler.core.status.OnHold('')):
+        for task in self.retrieve_tasks(tags, container=container,
+                                        status=mahler.core.status.OnHold('')):
             if updated >= limit:
                 return updated
 
@@ -103,13 +104,13 @@ class Registrar(object):
 
         return updated
 
-    def maintain_to_queue(self, tags, limit=10e10):
+    def maintain_to_queue(self, tags, container=None, limit=10e10):
         statuses = [mahler.core.status.Interrupted(''),
                     mahler.core.status.FailedOver(''),
                     mahler.core.status.SwitchedOver('')]
         updated = 0
         for status in statuses:
-            for task in self.retrieve_tasks(tags, status=status):
+            for task in self.retrieve_tasks(tags, container=container, status=status):
                 if updated >= limit:
                     return updated
 
@@ -124,7 +125,7 @@ class Registrar(object):
 
         return updated
 
-    def maintain_lost(self, tags, limit=10e10):
+    def maintain_lost(self, tags, container=None, limit=10e10):
         return 0
 
     def register_tasks(self, tasks, message='new task'):
@@ -143,10 +144,10 @@ class Registrar(object):
 
     # TODO: Register reports
 
-    def retrieve_tasks(self, tags, status=None):
+    def retrieve_tasks(self, tags, container=None, status=None):
         """
         """
-        for task_document in self._db.retrieve_tasks(tags, status):
+        for task_document in self._db.retrieve_tasks(tags, container, status):
             operator = Operator(**task_document['op'])
             task = Task(operator, arguments=task_document['arguments'], id=task_document['id'],
                         name=task_document['name'], registrar=self)

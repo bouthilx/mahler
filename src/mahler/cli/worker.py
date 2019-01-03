@@ -23,6 +23,9 @@ def build(parser):
         '--tags', nargs='*', help='tags to select tasks for execution')
 
     execute_parser.add_argument(
+        '--container', help='container used to execute the worker')
+
+    execute_parser.add_argument(
         '--working-dir', help='Working directory')
 
     execute_parser.add_argument(
