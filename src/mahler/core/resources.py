@@ -31,7 +31,7 @@ def build(**kwargs):
         in pkg_resources.iter_entry_points('Scheduler')
     }
 
-    scheduler_type = kwargs.get('type', mahler.core.config.scheduler.type)
+    scheduler_type = kwargs.get('type', config.scheduler.type)
 
     load_config(type=scheduler_type)
 
@@ -39,10 +39,10 @@ def build(**kwargs):
         raise ValueError(
             "No type provided to build a scheduler:\n{}".format(pprint.pformat(kwargs)))
 
-    config = mahler.core.config.scheduler[scheduler_type].to_dict()
-    config.update(kwargs)
+    scheduler_config = config.scheduler[scheduler_type].to_dict()
+    scheduler_config.update(kwargs)
     
-    return plugins[scheduler_type].load().build(**config)
+    return plugins[scheduler_type].load().build(**scheduler_config)
 
 
 def load_config(**kwargs):
@@ -59,7 +59,7 @@ def load_config(**kwargs):
         in pkg_resources.iter_entry_points('Scheduler')
     }
 
-    scheduler_type = kwargs.get('type', mahler.core.config.scheduler.type)
+    scheduler_type = kwargs.get('type', config.scheduler.type)
 
     if scheduler_type is None or scheduler_type == 'None':
         raise ValueError(
@@ -67,5 +67,5 @@ def load_config(**kwargs):
 
     plugin = plugins[scheduler_type].load()
 
-    mahler.core.config.scheduler[scheduler_type] = plugin.define_config()
-    plugin.parse_config_files(mahler.core.config.scheduler[scheduler_type])
+    config.scheduler[scheduler_type] = plugin.define_config()
+    plugin.parse_config_files(config.scheduler[scheduler_type])
