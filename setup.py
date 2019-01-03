@@ -5,7 +5,7 @@ from glob import iglob
 import os
 import sys
 
-from setuptools import setup
+from setuptools import setup, find_namespace_packages
 
 import versioneer
 
@@ -13,13 +13,6 @@ repo_root = os.path.dirname(os.path.abspath(__file__))
 
 tests_require = [
     'pytest>=3.0.0'
-    ]
-
-
-packages = [
-    'mahler.core',
-    'mahler.cli',
-    'mahler.client'
     ]
 
 
@@ -33,7 +26,7 @@ setup_args = dict(
     author=u'Xavier Bouthillier',
     author_email='xavier.bouthillier@umontreal.ca',
     url='https://github.com/bouthilx/mahler',
-    packages=packages,
+    packages=find_namespace_packages(where='src'),
     package_dir={'': 'src'},
     include_package_data=True,
     install_requires=['PyYAML', 'appdirs'],
