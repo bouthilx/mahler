@@ -33,7 +33,7 @@ def load_modules_parser(main_parser):
 
 
 def build_main_parser():
-    parser = argparse.ArgumentParser(description='Laboratorium')
+    parser = argparse.ArgumentParser(description='Mahler')
 
     parser.add_argument(
         '-V', '--version',
