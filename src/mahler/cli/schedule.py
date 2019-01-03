@@ -23,6 +23,16 @@ def build(parser):
     """Return the parser that needs to be used for this command"""
     schedule_parser = parser.add_parser('schedule', help='schedule help')
 
+    schedule_parser.add_argument(
+        '--tags', nargs='*', help='tags to select tasks to schedule')
+
+    schedule_parser.add_argument(
+        '--container', help='container used to execute the workers')
+
+    # TODO: Should the working directory be task-specific? 
+    schedule_parser.add_argument(
+        '--working-dir', help='Working directory of the workers')
+
     load_modules_parser(schedule_parser)
 
     schedule_parser.set_defaults(func=main)
@@ -42,11 +52,14 @@ def load_modules_parser(main_parser):
 
 
 def main(args):
+    tags = args['tags']
+    container = args['container']
+    working_dir = args['working_dir']
     registrar = mahler.core.registrar.build()
     ressources = mahler.core.resources.build(type=args['scheduler'], **args)
-    tags = ['examples', 'random', 'flow', 'v1.0']
     registrar.maintain(tags)
-    tasks = registrar.retrieve_tasks(tags, status=mahler.core.status.Queued(''))
+    tasks = registrar.retrieve_tasks(tags, container=container,
+                                     status=mahler.core.status.Queued(''))
     task_per_container = dict()
     for task in tasks:
         container = task.container if task.container else None
@@ -67,6 +80,7 @@ def main(args):
     # TODO: Divide fair share between containers. If first workers are all on the same container
     #       they may quickly exhaust the queue for this specific container and we will end up
     #       with no workers.
-    for container, tasks in task_per_container.items():
+    for tasks_container, tasks in task_per_container.items():
         if ressources.available():
-            ressources.submit(tasks + any_container, container=container, tags=tags)
+            ressources.submit(tasks + any_container, container=tasks_container, tags=tags,
+                              working_dir=working_dir)
