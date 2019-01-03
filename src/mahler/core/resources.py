@@ -8,6 +8,7 @@
    :synopsis: Defines the abstract class for scheduler plugins
 """
 import pkg_resources
+import pprint
 
 from mahler.core import config
 
