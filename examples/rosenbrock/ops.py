@@ -1,4 +1,5 @@
 import logging
+import random
 
 from mahler.client import Client
 
@@ -9,14 +10,14 @@ logger = logging.getLogger('ops')
 mahler = Client()
 
 
-tags = ['examples', 'rosenbrock', 'random', 'v1.0']
+tags = ['examples', 'rosenbrock', 'random', 'v1.1']
 
 
 space_keys = 'xyz'
 
 
 def sample():
-    random.uniform(-10, 10)
+    return random.uniform(-10, 10)
 
 
 def rosenbrock(*args):
