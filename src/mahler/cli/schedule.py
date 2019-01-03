@@ -9,6 +9,7 @@
 """
 import logging
 import pkg_resources
+import pprint
 
 import mahler.core.registrar
 import mahler.core.resources
@@ -16,7 +17,7 @@ import mahler.core.status
 import mahler.core.worker
 
 
-log = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 
 def build(parser):
@@ -52,12 +53,15 @@ def load_modules_parser(main_parser):
 
 
 def main(args):
+    logger.debug('arguments: {}'.format(pprint.pformat(args)))
     tags = args['tags']
     container = args['container']
     working_dir = args['working_dir']
     registrar = mahler.core.registrar.build()
     ressources = mahler.core.resources.build(type=args['scheduler'], **args)
+    logger.info('Maintaining tags')
     registrar.maintain(tags)
+    logger.info('Retrieving tasks')
     tasks = registrar.retrieve_tasks(tags, container=container,
                                      status=mahler.core.status.Queued(''))
     task_per_container = dict()
@@ -67,6 +71,13 @@ def main(args):
             task_per_container[container] = []
 
         task_per_container[container].append(task)
+
+    logger.info(
+        '{} tasks available:\n{}'.format(
+            sum(len(tasks) for tasks in task_per_container.values()),
+            "\n".join(
+                '{}: {}'.format(tasks_container, len(tasks))
+                for tasks_container, tasks in task_per_container.items())))
 
     if not task_per_container:
         return
@@ -81,6 +92,8 @@ def main(args):
     #       they may quickly exhaust the queue for this specific container and we will end up
     #       with no workers.
     for tasks_container, tasks in task_per_container.items():
-        if ressources.available():
+        available_resources = ressources.available()
+        logger.info('{} nodes available'.format(available_resources))
+        if available_resources:
             ressources.submit(tasks + any_container, container=tasks_container, tags=tags,
                               working_dir=working_dir)
