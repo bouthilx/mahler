@@ -1,5 +1,6 @@
 import copy
 import logging
+import os
 import sys
 
 from mahler.core.attributes import EventBasedItemAttribute, EventBasedListAttribute
@@ -117,9 +118,20 @@ class Task(object):
         #       inputs for the functions itself can be objects that are not in the current
         #       `inputs` object, but rather coming for the output of `restore()`. This is 
         #       partly why we need to output for inputs used from `op.run()`.
-        data, volume = self.op.run(inputs, stdout=stdout, stderr=stderr)
+        os.environ['_MAHLER_TASK_ID'] = str(self.id)
+        rval = self.op.run(inputs, stdout=stdout, stderr=stderr)
+        os.environ['_MAHLER_TASK_ID'] = ''
         # NOTE: Inputs is modified inplace, so it now contains restored input if op.restore()
         #       got executed during op.run()
+
+        if isinstance(rval, tuple) and len(rval) == 2:
+            data, volume = rval
+        elif rval is None:
+            data = {}
+            volume = {}
+        else:
+            data = rval
+            volume = {}
 
         if not self.op.immutable:
             state.update(self, inputs)

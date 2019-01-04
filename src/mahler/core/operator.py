@@ -254,10 +254,10 @@ class Operator(object):
         # with contextlib.redirect_stdout(stdout):
         #     with contextlib.redirect_stderr(stderr):
         with stdredirect(stdout, stderr):
-            data, volume = self._fct(**fct_inputs)
-        logger.debug('Executing completed')
+            rval = self._fct(**fct_inputs)
+        logger.debug('Execution completed')
 
-        return data, volume
+        return rval
 
     def delay(self, *args, **kwargs):
 
