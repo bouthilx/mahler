@@ -28,7 +28,7 @@ class RegistrarDB(object):
     def register_task(self, task):
         raise NotImplemented()
     
-    def retrieve_tasks(self, tags, container=None, status=None):
+    def retrieve_tasks(self, id=None, tags=tuple(), container=None, status=None):
         raise NotImplemented()
 
     def add_event(self, event_type, event_object):
@@ -88,7 +88,7 @@ class Registrar(object):
 
     def maintain_onhold(self, tags, container=None, limit=10e10):
         updated = 0
-        for task in self.retrieve_tasks(tags, container=container,
+        for task in self.retrieve_tasks(tags=tags, container=container,
                                         status=mahler.core.status.OnHold('')):
             if updated >= limit:
                 return updated
@@ -110,7 +110,7 @@ class Registrar(object):
                     mahler.core.status.SwitchedOver('')]
         updated = 0
         for status in statuses:
-            for task in self.retrieve_tasks(tags, container=container, status=status):
+            for task in self.retrieve_tasks(tags=tags, container=container, status=status):
                 if updated >= limit:
                     return updated
 
@@ -144,10 +144,10 @@ class Registrar(object):
 
     # TODO: Register reports
 
-    def retrieve_tasks(self, tags, container=None, status=None):
+    def retrieve_tasks(self, id=None, tags=tuple(), container=None, status=None):
         """
         """
-        for task_document in self._db.retrieve_tasks(tags, container, status):
+        for task_document in self._db.retrieve_tasks(id, tags, container, status):
             operator = Operator(**task_document['op'])
             task = Task(operator, arguments=task_document['arguments'], id=task_document['id'],
                         name=task_document['name'], registrar=self)

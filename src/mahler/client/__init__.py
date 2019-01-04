@@ -25,9 +25,7 @@ class Client(object):
         # self.change_priority(task, priority)
         self.add_tags(task, tags)
         # self.registrar.update_report(task)
-
-    def find(self, tags=tuple(), status=None):
-        return self.registrar.retrieve_tasks(tags=tags, status=status)
+        return task
 
     def get_task(self):
         if not Dispatcher.__refs__:
@@ -38,6 +36,9 @@ class Client(object):
         #     return None
 
         # return self.find(id=os.environ['_MAHLER_TASK_ID'])
+
+    def find(self, id=None, tags=tuple(), container=None, status=None):
+        return self.registrar.retrieve_tasks(id=id, tags=tags, container=container, status=status)
 
     def add_tags(self, task, tags, message=''):
         return self.registrar.add_tags(task, tags, message)

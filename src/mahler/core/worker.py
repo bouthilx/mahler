@@ -310,7 +310,7 @@ class Dispatcher(object):
 
     def pick(self, tags, container, state):
         tasks = self.registrar.retrieve_tasks(
-            tags, container=container,
+            tags=tags, container=container,
             status=mahler.core.status.Queued(''))
         # TODO: Sort by priority
         # TODO: Pick tasks based on what is available in state (needs dependencies implementation)
