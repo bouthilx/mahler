@@ -78,8 +78,8 @@ def execute(registrar, state, task):
         utcnow = datetime.datetime.utcnow()
         stdout.write(STOPPING_TEMPLATE.format(utcnow))
         stderr.write(STOPPING_TEMPLATE.format(utcnow))
-        logger.debug(stdout.getvalue())
-        logger.debug(stderr.getvalue())
+        logger.info(stdout.getvalue())
+        logger.info(stderr.getvalue())
         if stdout.getvalue():
             task._stdout.refresh()
             registrar.update_stdout(task, stdout.getvalue())
