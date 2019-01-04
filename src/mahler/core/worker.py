@@ -6,6 +6,7 @@ import os
 import time
 import sys
 import traceback
+import weakref
 
 import mahler.core.registrar
 import mahler.core.utils.errors
@@ -294,8 +295,18 @@ class Worker(object):
 
 
 class Dispatcher(object):
+
+    __refs__ = weakref.WeakSet()
+
     def __init__(self, registrar):
         self.registrar = registrar
+        self._picked_task = None
+
+        self.__refs__.add(self)
+
+    @property
+    def picked_task(self):
+        return self._picked_task
 
     def pick(self, tags, container, state):
         tasks = self.registrar.retrieve_tasks(
@@ -306,6 +317,7 @@ class Dispatcher(object):
         for task in tasks:
             try:
                 self.registrar.reserve(task)
+                self._picked_task = task
                 return task
             except (ValueError, mahler.core.registrar.RaceCondition) as e:
                 logger.info('Task {} reserved by concurrent worker'.format(task.id))

@@ -1,5 +1,6 @@
 import mahler.core.operator
 import mahler.core.registrar
+from mahler.core.worker import Dispatcher
 
 
 class Client(object):
@@ -27,6 +28,16 @@ class Client(object):
 
     def find(self, tags=tuple(), status=None):
         return self.registrar.retrieve_tasks(tags=tags, status=status)
+
+    def get_task(self):
+        if not Dispatcher.__refs__:
+            return None
+
+        return next(iter(Dispatcher.__refs__)).picked_task
+        # if not os.environ['_MAHLER_TASK_ID']:
+        #     return None
+
+        # return self.find(id=os.environ['_MAHLER_TASK_ID'])
 
     def add_tags(self, task, tags, message=''):
         return self.registrar.add_tags(task, tags, message)
