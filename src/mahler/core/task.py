@@ -60,7 +60,7 @@ class Task(object):
         self._parent = None
         self._dependencies = []
         self._container = container
-        self._ressources = {}
+        self._resources = {}
         self.id = id
         self._priority = EventBasedItemAttribute(self, 'priority')
         self._status = EventBasedItemAttribute(self, 'status')
@@ -148,10 +148,10 @@ class Task(object):
         return self._arguments
 
     @property
-    def ressources(self):
-        ressources = copy.deepcopy(self.op.ressources)
-        ressources.update(self._ressources)
-        return ressources
+    def resources(self):
+        resources = copy.deepcopy(self.op.resources)
+        resources.update(self._resources)
+        return resources
 
     @property
     def resumable(self):
@@ -241,7 +241,7 @@ class Task(object):
                 container=self.container),
             facility=dict(
                 # host is event-sourced
-                ressources=self.ressources),
+                resources=self.resources),
             op=self.op.to_dict(),
             arguments=self.arguments,
             # stdout is event-sourced

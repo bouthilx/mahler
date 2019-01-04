@@ -52,11 +52,11 @@ def stdredirect(stdout, stderr):
         undo()
 
 
-def wrap(restore=None, ressources=None, immutable=False, resumable=False):
+def wrap(restore=None, resources=None, immutable=False, resumable=False):
 
     def call(f):
 
-        operator = Operator(f, restore=restore, ressources=ressources, immutable=immutable)
+        operator = Operator(f, restore=restore, resources=resources, immutable=immutable)
 
         return operator
 
@@ -66,7 +66,7 @@ def wrap(restore=None, ressources=None, immutable=False, resumable=False):
 
 class Operator(object):
     def __init__(self, fct, fct_signature=None, restore=None, restore_signature=None,
-                 ressources=None, immutable=False, resumable=False):
+                 resources=None, immutable=False, resumable=False):
         if isinstance(fct, str):
             self.module_string = fct
             try:
@@ -91,7 +91,7 @@ class Operator(object):
         # TODO
         # self.node = DAGNode(self)
         self._restore = restore
-        self._ressources = ressources
+        self._resources = resources
         self.immutable = immutable
         self.resumable = resumable
 
@@ -115,8 +115,8 @@ class Operator(object):
         return self._fct.__name__
 
     @property
-    def ressources(self):
-        return self._ressources if self._ressources else {}
+    def resources(self):
+        return self._resources if self._resources else {}
 
     def to_dict(self):
         op_document = dict(
