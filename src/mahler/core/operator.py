@@ -242,6 +242,8 @@ class Operator(object):
         #     self.restore(inputs)
         # elif self.is_incomplete(inputs):
         #     raise TypeError("Missing arguments: {}".format(self.is_incomplete(inputs)))
+        if self.is_incomplete(inputs):
+            raise TypeError("Missing arguments: {}".format(self.is_incomplete(inputs)))
 
         logger.debug('Building inputs')
         fct_inputs = {}
