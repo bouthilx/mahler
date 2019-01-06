@@ -62,7 +62,7 @@ def main(args):
     logger.info('Maintaining tags')
     registrar.maintain(tags)
     logger.info('Retrieving tasks')
-    tasks = registrar.retrieve_tasks(tags, container=container,
+    tasks = registrar.retrieve_tasks(tags=tags, container=container,
                                      status=mahler.core.status.Queued(''))
     task_per_container = dict()
     for task in tasks:
