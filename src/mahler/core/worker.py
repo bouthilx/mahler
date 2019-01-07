@@ -15,6 +15,9 @@ import mahler.core.utils.errors
 
 logger = logging.getLogger('mahler.core.worker')
 
+# TODO: If in debug mode,
+#       when code change is detected, interrupt process and start over the worker with
+#       up-to-date code.
 
 STOPPING_TEMPLATE = '---\nStopping execution: {}\n---\n'
 STARTING_TEMPLATE = '---\nStarting execution: {}\n---\n'
