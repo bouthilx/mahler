@@ -1,5 +1,6 @@
 import mahler.core.operator
 import mahler.core.registrar
+import mahler.core.status
 from mahler.core.worker import Dispatcher
 
 
@@ -49,11 +50,20 @@ class Client(object):
     def change_priority(self, task, priority):
         return
 
-    def suspend(self, task):
-        return
+    def cancel(self, task, message):
+        return self.registrar.update_status(task, mahler.core.status.Cancelled(message))
 
-    def switchover(self, task):
-        return
+    def suspend(self, task, message):
+        return self.registrar.update_status(task, mahler.core.status.Suspended(message))
 
-    def acknowledge(self, task):
-        return
+    def switchover(self, task, message):
+        return self.registrar.update_status(task, mahler.core.status.SwitchedOver(message))
+
+    def acknowledge(self, task, message):
+        return self.registrar.update_status(task, mahler.core.status.Acknowledged(message))
+
+    def resume(self, task, message):
+        try:
+            return self.registrar.update_status(task, mahler.core.status.Queued(message))
+        except ValueError:
+            return self.registrar.update_status(task, mahler.core.status.OnHold(message))
