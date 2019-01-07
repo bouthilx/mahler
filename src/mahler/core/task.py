@@ -229,7 +229,7 @@ class Task(object):
 
         if self._volume is None:
             # NOTE: If not in DB, then it is None
-            self._volume = self._registrar.retrieve_volume(task)
+            self._volume = self._registrar.retrieve_volume(self)
 
         return self._volume
 
@@ -240,7 +240,8 @@ class Task(object):
 
         return self.op.name
 
-    def to_dict(self):
+    def to_dict(self, report=True):
+
         task_document = dict(
             name=self.name,
             bounds=dict(
@@ -264,4 +265,18 @@ class Task(object):
         if self.id:
             task_document['id'] = self.id
 
-        return task_document
+        if not report:
+            return task_document
+
+        if self.id is None:
+            raise RuntimeError("Cannot build report if task is not registered")
+
+        report_document = task_document
+        # TODO:
+        # report['bounds']['priority'] = self.priority
+        report_document['registry']['status'] = self.status.name
+        report_document['registry']['tags'] = self.tags
+        # TODO
+        # report['facility']['host'] = self.host
+
+        return report_document

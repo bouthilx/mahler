@@ -178,6 +178,7 @@ def _main(tags=tuple(), container=None, max_tasks=10e10, depletion_patience=12,
         print('Executing task: {}'.format(task.id))
         assert task.status.name == 'Reserved'
         registrar.update_status(task, mahler.core.status.Running('start execution'))
+        registrar.update_report(task)
         try:
             new_status = execute(registrar, state, task)
         except BaseException as e:
@@ -196,6 +197,8 @@ def _main(tags=tuple(), container=None, max_tasks=10e10, depletion_patience=12,
             if broke_n_times < max_failedover_attempts:
                 registrar.update_status(
                     task, mahler.core.status.FailedOver('Broke {} times'.format(broke_n_times)))
+
+        registrar.update_report(task)
 
         # Use an interface with Kleio to fetch data and save it in lab's db.
         # Could be sacred, comet.ml or WandB...
@@ -312,7 +315,9 @@ class Dispatcher(object):
     def pick(self, tags, container, state):
         tasks = self.registrar.retrieve_tasks(
             tags=tags, container=container,
-            status=mahler.core.status.Queued(''))
+            status=mahler.core.status.Queued(''),
+            limit=100)
+
         # TODO: Sort by priority
         # TODO: Pick tasks based on what is available in state (needs dependencies implementation)
         for task in tasks:

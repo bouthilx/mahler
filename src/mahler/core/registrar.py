@@ -28,7 +28,7 @@ class RegistrarDB(object):
     def register_task(self, task):
         raise NotImplemented()
     
-    def retrieve_tasks(self, id=None, tags=tuple(), container=None, status=None):
+    def retrieve_tasks(self, id=None, tags=tuple(), container=None, status=None, limit=None):
         raise NotImplemented()
 
     def add_event(self, event_type, event_object):
@@ -41,6 +41,12 @@ class RegistrarDB(object):
         raise NotImplemented()
 
     def set_volume(self, task, volume):
+        raise NotImplemented()
+
+    def retrieve_output(self, task):
+        raise NotImplemented()
+
+    def retrieve_volume(self, task):
         raise NotImplemented()
 
 
@@ -72,30 +78,91 @@ class Registrar(object):
     def retrieve_volumes(self, task):
         raise NotImplemented()
 
-    def maintain(self, tags, container=None, limit=10e10):
+    def maintain(self, tags, container=None, limit=100):
         """
-            1. check for onhold that can be queued
-            2. check for interrupted that can be queued
-            3. check for failed-over that can be queued
-            4. check for switched-over that can be queued
-            5. check for lost tasks that can be failed-over
+            0. Update reports
+            1. check for lost tasks that can be failed-over
+            2. check for interrupted that can be re-queued
+            3. check for failed-over that can be re-queued
+            4. check for switched-over that can be re-queued
+            5. check for onhold that can be queued
         """
-        updated = self.maintain_onhold(tags, container, limit=limit)
+        updated = self.maintain_reports(tags, container, limit=limit)
+        logger.info('Updated {} reports'.format(updated))
+        updated = self.maintain_lost(tags, container, limit=limit)
         updated += self.maintain_to_queue(tags, container, limit=limit - updated)
-        updated += self.maintain_lost(tags, container, limit=limit - updated)
+        updated += self.maintain_onhold(tags, container, limit=limit - updated)
 
         return updated
 
-    def maintain_onhold(self, tags, container=None, limit=10e10):
+    def maintain_reports(self, tags, container=None, limit=100):
         updated = 0
-        for task in self.retrieve_tasks(tags=tags, container=container,
-                                        status=mahler.core.status.OnHold('')):
-            if updated >= limit:
-                return updated
+        volatile_status = [mahler.core.status.Queued(''),
+                           mahler.core.status.Reserved(''),
+                           mahler.core.status.Running('')]
+        queueable_status = [mahler.core.status.OnHold(''),
+                            mahler.core.status.Interrupted(''),
+                            mahler.core.status.FailedOver(''),
+                            mahler.core.status.SwitchedOver('')]
+        mutable_status = [mahler.core.status.Suspended(''),
+                          mahler.core.status.Acknowledged(''),
+                          mahler.core.status.Cancelled(''),
+                          mahler.core.status.Broken('')]
 
-            # TODO: Implement dependecies and test
+        def is_outdated(task, task_document):
+            return ((task.status.name != task_document['registry']['status']) or
+                    (set(task.tags) != set(task_document['registry']['tags'])))
+
+        projection = {'registry.status': 1, 'registry.tags': 1}
+
+        for status_family in [volatile_status, queueable_status, mutable_status]:
+
+            limit -= updated
+            
+            task_iterator = self.retrieve_tasks(
+                tags=tags, container=container, status=status_family, limit=limit,
+                _return_doc=True, _projection=projection)
+
+            for task_document in task_iterator:
+
+                task = Task(op=None, arguments=None, id=task_document['id'],
+                            name=None, registrar=self)
+
+                if is_outdated(task, task_document):
+                    self.update_report(task)
+                    updated += 1
+
+        return updated
+
+    def maintain_to_queue(self, tags, container=None, limit=100):
+        queueable_status = [mahler.core.status.OnHold(''),
+                            mahler.core.status.Interrupted(''),
+                            mahler.core.status.FailedOver(''),
+                            mahler.core.status.SwitchedOver('')]
+
+        status_names = [status.name for status in queueable_status]
+
+        projection = {'registry.status': 1}
+
+        task_iterator = self.retrieve_tasks(
+            tags=tags, container=container, status=queueable_status, limit=limit,
+            _return_doc=True, _projection=projection)
+
+        updated = 0
+        for task_document in task_iterator:
+            task = Task(op=None, arguments=None, id=task_document['id'],
+                        name=None, registrar=self)
+
+            if task.status.name not in status_names:
+                self.update_report(task)
+                continue
+
             try:
-                self.update_status(task, mahler.core.status.Queued('dependencies met'))
+                self.update_status(
+                    task,
+                    mahler.core.status.Queued(
+                        're-queue {} task'.format(task_document['registry']['status'])))
+                self.update_report(task)
             except (ValueError, RaceCondition) as e:
                 logger.debug('Task {} status changed concurrently'.format(task.id))
                 continue
@@ -104,28 +171,39 @@ class Registrar(object):
 
         return updated
 
-    def maintain_to_queue(self, tags, container=None, limit=10e10):
-        statuses = [mahler.core.status.Interrupted(''),
-                    mahler.core.status.FailedOver(''),
-                    mahler.core.status.SwitchedOver('')]
+    def maintain_onhold(self, tags, container=None, limit=100):
+        onhold_status = mahler.core.status.OnHold('')
+
         updated = 0
-        for status in statuses:
-            for task in self.retrieve_tasks(tags=tags, container=container, status=status):
-                if updated >= limit:
-                    return updated
 
-                try:
-                    self.update_status(
-                        task, mahler.core.status.Queued('re-queue {} task'.format(status.name)))
-                except (ValueError, RaceCondition) as e:
-                    logger.debug('Task {} status changed concurrently'.format(task.id))
-                    continue
+        # TODO: Implement dependencies and test
+        projection = {'registry.status': 1}  # , 'bounds.dependencies': 1}
 
-                updated += 1
+        task_iterator = self.retrieve_tasks(
+            tags=tags, container=container, status=onhold_status, limit=limit,
+            _return_doc=True, _projection=projection)
+
+        for task_document in task_iterator:
+            task = Task(op=None, arguments=None, id=task_document['id'],
+                        name=None, registrar=self)
+            if task.status.name != onhold_status.name:
+                self.update_report(task)
+                continue
+
+            # TODO: Implement dependencies and test
+            # task._dependencies = task_document['bounds.dependencies']
+            try:
+                self.update_status(task, mahler.core.status.Queued('dependencies met'))
+                self.update_report(task)
+            except (ValueError, RaceCondition) as e:
+                logger.debug('Task {} status changed concurrently'.format(task.id))
+                continue
+
+            updated += 1
 
         return updated
 
-    def maintain_lost(self, tags, container=None, limit=10e10):
+    def maintain_lost(self, tags, container=None, limit=100):
         return 0
 
     def register_tasks(self, tasks, message='new task'):
@@ -141,13 +219,22 @@ class Registrar(object):
             task._registrar = self
             self.update_status(task, mahler.core.status.OnHold(message))
             self.add_tags(task, [task.name])
+            self.update_report(task, upsert=True)
 
-    # TODO: Register reports
+    def update_report(self, task, upsert=False):
+        self._db.update_report(task, upsert)
 
-    def retrieve_tasks(self, id=None, tags=tuple(), container=None, status=None):
+    def retrieve_tasks(self, id=None, tags=tuple(), container=None, status=None, limit=None,
+                       use_report=True, _return_doc=False, _projection=None):
         """
         """
-        for task_document in self._db.retrieve_tasks(id, tags, container, status):
+        task_iterator = self._db.retrieve_tasks(id, tags, container, status, limit=limit,
+                                                use_report=use_report, projection=_projection)
+        for task_document in task_iterator:
+            if _return_doc:
+                yield task_document
+                continue
+
             operator = Operator(**task_document['op'])
             task = Task(operator, arguments=task_document['arguments'], id=task_document['id'],
                         name=task_document['name'], registrar=self)
@@ -268,6 +355,9 @@ class Registrar(object):
 
     def retrieve_output(self, task):
         return self._db.retrieve_output(task)
+
+    def retrieve_volume(self, task):
+        return self._db.retrieve_volume(task)
 
 
 def build(**kwargs):
