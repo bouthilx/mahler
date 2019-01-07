@@ -96,16 +96,16 @@ def execute(registrar, state, task):
 
 
 def main(tags=tuple(), container=None, working_dir=None, max_tasks=10e10, depletion_patience=12,
-         exhaust_wait_time=10, max_maintain=10, **kwargs):
+         exhaust_wait_time=10, max_maintain=10, max_failedover_attempts=5, **kwargs):
 
     with tmp_directory(working_dir):
         _main(tags=tags, container=container, max_tasks=max_tasks,
               depletion_patience=depletion_patience, exhaust_wait_time=exhaust_wait_time,
-              max_maintain=max_maintain)
+              max_maintain=max_maintain, max_failedover_attempts=max_failedover_attempts)
 
 
 def _main(tags=tuple(), container=None, max_tasks=10e10, depletion_patience=12,
-          exhaust_wait_time=10, max_maintain=10):
+          exhaust_wait_time=10, max_maintain=10, max_failedover_attempts=5):
     # TODO: Support config
     registrar = mahler.core.registrar.build(name='mongodb')
     dispatcher = Dispatcher(registrar)
@@ -193,8 +193,9 @@ def _main(tags=tuple(), container=None, max_tasks=10e10, depletion_patience=12,
         if isinstance(new_status, mahler.core.status.Broken):
             broke_n_times = sum(int(event['item']['name'] == new_status.name)
                                 for event in task._status.history)
-            registrar.update_status(
-                task, mahler.core.status.FailedOver('Broke {} times'.format(broke_n_times)))
+            if broke_n_times < max_failedover_attempts:
+                registrar.update_status(
+                    task, mahler.core.status.FailedOver('Broke {} times'.format(broke_n_times)))
 
         # Use an interface with Kleio to fetch data and save it in lab's db.
         # Could be sacred, comet.ml or WandB...

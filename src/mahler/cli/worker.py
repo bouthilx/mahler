@@ -33,6 +33,10 @@ def build(parser):
         help='Maximum number of tasks to execute. Default: practicaly inf (10e10)')
 
     execute_parser.add_argument(
+        '--max-failedover-attempts', default=5, type=int,
+        help=('Number of times to try again the execution of a broken task. Default: 5'))
+
+    execute_parser.add_argument(
         '--max-maintain', default=10, type=int,
         help=('Maximum number of tasks to maintaint when no more tasks available. '
               'Maintaining many tasks increases the delay between executions but improves '
