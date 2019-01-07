@@ -1,3 +1,5 @@
+import random
+
 import contextlib
 import datetime
 import io
@@ -321,6 +323,10 @@ class Dispatcher(object):
         # TODO: Sort by priority
         # TODO: Pick tasks based on what is available in state (needs dependencies implementation)
         for task in tasks:
+            # To reduce race conditions
+            if random.random() >= 0.5:
+                continue
+
             try:
                 self.registrar.reserve(task)
                 self._picked_task = task
