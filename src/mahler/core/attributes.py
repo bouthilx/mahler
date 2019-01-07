@@ -57,7 +57,9 @@ class EventBasedAttribute(object):
     def refresh(self):
         if self.task._registrar:
             # self.history = self.task._registrar.retrieve_status(self.task)
-            self.history = list(self.task._registrar._db.retrieve_events(self.name, self.task))
+            self.history = list(
+                sorted(self.task._registrar._db.retrieve_events(self.name, self.task),
+                       key=lambda event: event['creation_timestamp']))
         # query = {"trial_id": self._trial_id}
         # lower_bound, upper_bound = self._interval
         # if (self.history and
