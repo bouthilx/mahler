@@ -49,6 +49,60 @@ def tmp_directory(working_dir=None):
         os.chdir(curdir)
 
 
+class Stream():
+    def __init__(self, flush_fct, buffer_size=50):
+        self.stdout = sys.stdout
+        self.stderr = sys.stderr
+        self.flush_fct = flush_fct
+        self.buffer_size = buffer_size
+        self.lines = []
+
+    def write(self, text):
+        n_chars = 0
+        if '\n' in text:
+            for line in text.split("\n"):
+                n_chars += self.writeline(line)
+        else:
+            self.lines.append(text)
+            n_chars = len(text)
+
+        if logger.isEnabledFor(logging.INFO):
+            self.stdout.write(text)
+
+        return n_chars
+
+    def writeline(self, line):
+        if self.lines and not self.lines[-1].endswith('\n'):
+            self.lines[-1] += line + '\n'
+        else:
+            self.lines.append(line + '\n')
+
+        if len(self.lines) > self.buffer_size:
+            self.flush()
+
+        return len(line) + 1
+
+    def flush(self):
+        # Make sure the flush_fct is not writing to this objects, otherwise it would cause an
+        # infinite recursion.
+        with stdredirect(self.stdout, self.stderr):
+            self.flush_fct(''.join(self.lines))
+        self.lines = []
+
+    def close(self):
+        self.flush()
+
+    def read(self):
+        raise NotImplementedError()
+
+    def readline(self):
+        raise NotImplementedError()
+
+    def seek(self):
+        raise NotImplementedError()
+
+    def tell(self):
+        raise NotImplementedError()
 
 
 async def heartbeat(registrar, task, loop, future, frequence=60):
@@ -108,12 +162,33 @@ def run(registrar, task, state, stdout, stderr):
 
 
 def execute(registrar, state, task):
+
+    sysstdout = sys.stdout
+    def flush_stdout(text):
+        try:
+            registrar.update_stdout(task, text)
+        except mahler.core.registrar.RaceCondition as e:
+            sysstdout.write("\n" * 10)
+            sysstdout.write(str(e))
+            task._stdout.refresh()
+            sysstdout.write("\n" * 10)
+            registrar.update_stdout(task, text)
+
+    def flush_stderr(text):
+        try:
+            registrar.update_stderr(task, text)
+        except mahler.core.registrar.RaceCondition as e:
+            task._stderr.refresh()
+            registrar.update_stderr(task, text)
+
     stdout = io.StringIO()
     stderr = io.StringIO()
+    # stdout = Stream(flush_stdout)
+    # stderr = Stream(flush_stderr)
 
     utcnow = datetime.datetime.utcnow()
-    stdout.write(STARTING_TEMPLATE.format(utcnow))
-    stderr.write(STARTING_TEMPLATE.format(utcnow))
+    stdout.write(STARTING_TEMPLATE.format(utcnow) + "\n")
+    stderr.write(STARTING_TEMPLATE.format(utcnow) + "\n")
 
     try:
         run(registrar, task, state, stdout, stderr)
@@ -135,22 +210,21 @@ def execute(registrar, state, task):
         # broken
         message = "execution error: {}".format(e)
         logger.info(message)
-        stderr.write(traceback.format_exc())
+        stderr.write(traceback.format_exc() + "\n")
         status = mahler.core.status.Broken(str(e))
         # status = mahler.core.status.FailedOver(str(e))
 
     finally:
         utcnow = datetime.datetime.utcnow()
-        stdout.write(STOPPING_TEMPLATE.format(utcnow))
-        stderr.write(STOPPING_TEMPLATE.format(utcnow))
-        logger.info(stdout.getvalue())
-        logger.info(stderr.getvalue())
-        if stdout.getvalue():
-            task._stdout.refresh()
-            registrar.update_stdout(task, stdout.getvalue())
-        if stderr.getvalue():
-            task._stderr.refresh()
-            registrar.update_stderr(task, stderr.getvalue())
+        stdout.write(STOPPING_TEMPLATE.format(utcnow) + "\n")
+        stderr.write(STOPPING_TEMPLATE.format(utcnow) + "\n")
+        registrar.update_stdout(task, stdout.getvalue())
+        registrar.update_stderr(task, stderr.getvalue())
+        print(task.stdout)
+        print(task.stderr)
+
+        # stdout.flush()
+        # stderr.flush()
 
     # TODO
     # NOTE: storage.write adds volume links to the registry.
