@@ -1,4 +1,7 @@
+import asyncio
+import multiprocessing as mp
 import random
+import time
 
 import contextlib
 import datetime
@@ -10,6 +13,7 @@ import sys
 import traceback
 import weakref
 
+from mahler.core.utils.std import stdredirect
 import mahler.core.registrar
 import mahler.core.utils.errors
 
@@ -45,6 +49,64 @@ def tmp_directory(working_dir=None):
         os.chdir(curdir)
 
 
+
+
+async def heartbeat(registrar, task, loop, future, frequence=60):
+    logger = logging.getLogger(__name__ + ".heartbeat")
+    logger.addHandler(logging.StreamHandler(sys.stdout))
+
+    heartbeat_status = mahler.core.status.Running('heartbeat')
+
+    while not future.done():
+        await asyncio.sleep(frequence)
+        try:
+            registrar.update_status(task, heartbeat_status)
+        except (ValueError, RaceCondition) as e:
+            new_status = task.status
+            if isinstance(new_status, mahler.core.status.Suspended):
+                raise mahler.core.utils.errors.SignalSuspend(
+                    'Task suspended remotely: {}'.format(new_status.message))
+            elif isinstance(new_status, mahler.core.status.Cancelled):
+                raise mahler.core.utils.errors.SignalCancel(
+                    'Task cancelled remotely: {}'.format(new_status.message))
+            else:
+                raise
+        except concurrent.futures.CancelledError:
+            break
+        finally:
+            registrar.update_report(task)
+
+    loop.stop()
+
+
+# NOTE: asyncio cannot work because task.run does not use asyncio, hence it never leaves the
+#       computation resources to hearbeat during execution. What should be done, is to execute the
+#       run in another process. The same will be done with the hearbeat, with a result object
+#       to store a message, Cancel, Suspend, or Error.
+
+
+async def async_run(task, state, stdout, stderr, future):
+    logger.info('Starting execution')
+    data, volume = task.run(state, stdout=stdout, stderr=stderr)
+    logger.info('Execution completed')
+    future.set_result(True)
+
+
+def run(registrar, task, state, stdout, stderr):
+    loop = asyncio.get_event_loop()
+
+    future_completion = asyncio.Future()
+
+    # Start concurrent heartbeat
+    asyncio.ensure_future(heartbeat(registrar, task,  loop, future_completion, frequence=60))
+    asyncio.ensure_future(async_run(task, state, stdout, stderr, future_completion))
+
+    try:
+        loop.run_forever()
+    finally:
+        loop.close()
+
+
 def execute(registrar, state, task):
     stdout = io.StringIO()
     stderr = io.StringIO()
@@ -54,9 +116,7 @@ def execute(registrar, state, task):
     stderr.write(STARTING_TEMPLATE.format(utcnow))
 
     try:
-        logger.info('Starting execution')
-        data, volume = task.run(state, stdout=stdout, stderr=stderr)
-        logger.info('Execution completed')
+        run(registrar, task, state, stdout, stderr)
         logger.debug('Saving output')
         registrar.set_output(task, data)
         logger.debug('Output saved')
