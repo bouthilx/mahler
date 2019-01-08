@@ -234,17 +234,77 @@ def execute(registrar, state, task):
     return status
 
 
-def main(tags=tuple(), container=None, working_dir=None, max_tasks=10e10, depletion_patience=12,
-         exhaust_wait_time=10, max_maintain=10, max_failedover_attempts=5, **kwargs):
+class Maintainer(mp.Process):
+    def __init__(self, tags, container, sleep_time, **kwargs):
+        super(Maintainer, self).__init__(**kwargs)
+        self.tags = tags
+        self.container = container
+        self.sleep_time = sleep_time
+        self.logger = logging.getLogger('mahler.daemon.' + self.__class__.__name__)
+        stream_handler = logging.StreamHandler(sys.stdout)
+        stream_handler.setFormatter(logging.getLogger().handlers[0].formatter)
+        self.logger.addHandler(stream_handler)
 
-    with tmp_directory(working_dir):
-        _main(tags=tags, container=container, max_tasks=max_tasks,
-              depletion_patience=depletion_patience, exhaust_wait_time=exhaust_wait_time,
-              max_maintain=max_maintain, max_failedover_attempts=max_failedover_attempts)
+    def run(self):
+        registrar = mahler.core.registrar.build(name='mongodb')
+
+        while True:
+            updated = self.maintain(registrar)
+            if updated:
+                self.logger.info("{} task updated".format(updated))
+            else:
+                sleep_time = random.random() * self.sleep_time
+                self.logger.info(
+                    'No more task to maintain. Waiting {}s before trying again.'.format(sleep_time))
+                time.sleep(sleep_time)
+
+    def maintain(self, registrar):
+        pass
+
+
+class UnreportedMaintainer(Maintainer):
+    def maintain(self, registrar):
+        return registrar.maintain_unreported(limit=None)
+
+
+class ReportMaintainer(Maintainer):
+    def maintain(self, registrar):
+        return registrar.maintain_reports(tags=self.tags, container=self.container, limit=None)
+
+
+class LostTaskMaintainer(Maintainer):
+    def maintain(self, registrar):
+        return registrar.maintain_lost(tags=self.tags, container=self.container, limit=None)
+
+
+class ToQueuedMaintainer(Maintainer):
+    def maintain(self, registrar):
+        return registrar.maintain_to_queue(tags=self.tags, container=self.container, limit=None)
+
+
+class OnHoldMaintainer(Maintainer):
+    def maintain(self, registrar):
+        return registrar.maintain_onhold(tags=self.tags, container=self.container, limit=None)
+
+
+def main(tags=tuple(), container=None, working_dir=None, max_tasks=10e10, depletion_patience=12,
+         exhaust_wait_time=10, max_failedover_attempts=5, **kwargs):
+
+    for maintainer in [UnreportedMaintainer, ReportMaintainer, LostTaskMaintainer,
+                       ToQueuedMaintainer, OnHoldMaintainer]:
+        maintainer(tags=tags, container=container, sleep_time=exhaust_wait_time, daemon=True).start()
+
+    import time
+    time.sleep(60 * 10)
+
+    # with tmp_directory(working_dir):
+    #     _main(tags=tags, container=container, max_tasks=max_tasks,
+    #           depletion_patience=depletion_patience, exhaust_wait_time=exhaust_wait_time,
+    #           max_failedover_attempts=max_failedover_attempts)
 
 
 def _main(tags=tuple(), container=None, max_tasks=10e10, depletion_patience=12,
-          exhaust_wait_time=10, max_maintain=10, max_failedover_attempts=5):
+          exhaust_wait_time=10, max_failedover_attempts=5):
     # TODO: Support config
     registrar = mahler.core.registrar.build(name='mongodb')
     dispatcher = Dispatcher(registrar)
@@ -271,11 +331,6 @@ def _main(tags=tuple(), container=None, max_tasks=10e10, depletion_patience=12,
         except RuntimeError:
             logger.info('Dispatcher could not pick any task for execution.')
             # NOTE: Maintainance could be done in parallel while a task is being executed.
-            updated = registrar.maintain(tags, container, limit=max_maintain)
-            if updated:
-                logger.info("{} task status updated and now queued".format(updated))
-                continue
-
             exhaust_failures += 1
             print("{} (UTC): No more task available, waiting {} seconds before "
                   "trying again. {} attemps remaining.".format(
