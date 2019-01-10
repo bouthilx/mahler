@@ -1,67 +1,15 @@
 from collections import OrderedDict
-import contextlib
 import inspect
 import importlib
 import logging
 import os
-import pdb
 import sys
 
 from mahler.core.task import Task
+from mahler.core.utils.std import stdredirect
+
 
 logger = logging.getLogger('mahler.core.operator')
-
-
-@contextlib.contextmanager
-def stdredirect(stdout, stderr):
-    old_stdout = sys.stdout
-    old_stderr = sys.stderr
-    root_logger = logging.getLogger()
-    old_stdout_logger_handler = root_logger.handlers[0]
-    old_set_trace = pdb.set_trace
-    new_stdout_logger_handler = logging.StreamHandler(stdout)
-
-    def redirect():
-        sys.stdout = stdout
-        sys.stderr = stderr
-        pdb.set_trace = set_trace
-        root_logger.addHandler(new_stdout_logger_handler)
-        root_logger.removeHandler(old_stdout_logger_handler)
-
-    def undo():
-        sys.stdout = old_stdout
-        sys.stderr = old_stderr
-        pdb.set_trace = old_set_trace
-        root_logger.addHandler(old_stdout_logger_handler)
-        root_logger.removeHandler(new_stdout_logger_handler)
-
-    def set_trace(*, header=None):
-        undo()
-
-        pdb_cmd = pdb.Pdb(stdout=sys.__stdout__)
-        if header is not None:
-            pdb_cmd.message(header)
-        pdb_cmd.set_trace(sys._getframe().f_back)
-
-        redirect()
-
-    redirect()
-    try:
-        yield None
-    finally:
-        undo()
-
-
-def wrap(restore=None, resources=None, immutable=False, resumable=False):
-
-    def call(f):
-
-        operator = Operator(f, restore=restore, resources=resources, immutable=immutable)
-
-        return operator
-
-    return call
-
 
 
 class Operator(object):
@@ -74,7 +22,7 @@ class Operator(object):
                     sys.path.append('.')
                 self._fct = self.import_function(fct)
             except ImportError as e:
-                logger.info('Cannot import function: {}'.format(str(e)))
+                logger.debug('Cannot import function: {}'.format(str(e)))
                 self._fct = None
         else:
             # Avoid wrapping operators. This is necessary for import tests.
