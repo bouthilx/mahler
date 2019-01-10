@@ -4,6 +4,18 @@ import mahler.core.status
 from mahler.core.worker import Dispatcher
 
 
+def operator(restore=None, resources=None, immutable=False, resumable=False):
+
+    def call(f):
+
+        operator = mahler.core.operator.Operator(
+            f, restore=restore, resources=resources, immutable=immutable)
+
+        return operator
+
+    return call
+
+
 class Client(object):
     CURRENT = 'current'
 
@@ -15,9 +27,6 @@ class Client(object):
             self.registrar = mahler.core.registrar.build(**registrar)
         else:
             raise ValueError("Invalid registrar argument: {}".format(registrar))
-
-    def operator(self, *args, **kwargs):
-        return mahler.core.operator.wrap(*args, **kwargs)
 
     def register(self, task, priority=0, after=None, before=None, tags=tuple(), container=None):
         # TODO: Set dependencies
