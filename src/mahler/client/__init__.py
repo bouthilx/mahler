@@ -1,4 +1,5 @@
 import mahler.core.operator
+import mahler.core.task
 import mahler.core.registrar
 import mahler.core.status
 from mahler.core.worker import Dispatcher
@@ -37,7 +38,7 @@ class Client(object):
         self.registrar.update_report(task.to_dict())
         return task
 
-    def get_task(self):
+    def get_current_task(self):
         if not Dispatcher.__refs__:
             return None
 
@@ -47,8 +48,10 @@ class Client(object):
 
         # return self.find(id=os.environ['_MAHLER_TASK_ID'])
 
-    def find(self, id=None, tags=tuple(), container=None, status=None):
-        return self.registrar.retrieve_tasks(id=id, tags=tags, container=container, status=status)
+    def find(self, id=None, tags=tuple(), container=None, status=None, _return_doc=False,
+             _projection=None):
+        return self.registrar.retrieve_tasks(id=id, tags=tags, container=container, status=status, 
+                                             _return_doc=_return_doc, _projection=_projection)
 
     def add_tags(self, task, tags, message=''):
         return self.registrar.add_tags(task, tags, message)
@@ -59,20 +62,38 @@ class Client(object):
     def change_priority(self, task, priority):
         return
 
+    def _create_shallow_task(self, task):
+        if not isinstance(task, mahler.core.task.Task):
+            task = mahler.core.task.Task(op=None, arguments=None, id=task, name=None,
+                                         registrar=self.registrar)
+            task._status.refresh()
+
+        return task
+
     def cancel(self, task, message):
-        return self.registrar.update_status(task, mahler.core.status.Cancelled(message))
+        return self._update_status(task, mahler.core.status.Cancelled(message))
 
     def suspend(self, task, message):
-        return self.registrar.update_status(task, mahler.core.status.Suspended(message))
+        return self._update_status(task, mahler.core.status.Suspended(message))
 
     def switchover(self, task, message):
-        return self.registrar.update_status(task, mahler.core.status.SwitchedOver(message))
+        return self._update_status(task, mahler.core.status.SwitchedOver(message))
 
     def acknowledge(self, task, message):
-        return self.registrar.update_status(task, mahler.core.status.Acknowledged(message))
+        return self._update_status(task, mahler.core.status.Acknowledged(message))
 
     def resume(self, task, message):
         try:
-            return self.registrar.update_status(task, mahler.core.status.Queued(message))
+            return self._update_status(task, mahler.core.status.Queued(message))
         except ValueError:
-            return self.registrar.update_status(task, mahler.core.status.OnHold(message))
+            return self._update_status(task, mahler.core.status.OnHold(message))
+        except BaseException as e:
+            print(type(e), str(e))
+            raise
+
+
+    def _update_status(self, task, new_status):
+        task = self._create_shallow_task(task)
+        rval = self.registrar.update_status(task, new_status)
+        self.registrar.update_report(task.to_dict())
+        return rval
