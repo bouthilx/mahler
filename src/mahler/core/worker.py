@@ -298,11 +298,17 @@ def execute(registrar, state, task):
         logger.debug('Output saved')
         status = mahler.core.status.Completed('')
 
+    except mahler.core.utils.errors.SignalSuspend as e:
+        status = mahler.core.status.Suspended('Suspended remotely (status changed to Suspended)')
+        raise
+
     except mahler.core.utils.errors.SignalCancel as e:
         status = mahler.core.status.Cancelled('Cancelled by user')
+        raise
 
     except mahler.core.utils.errors.SignalInterrupt as e:
         status = mahler.core.status.Interrupted('Interrupted by system (SIGTERM)')
+        raise
 
     except KeyboardInterrupt as e:
         status = mahler.core.status.Suspended('Suspended by user (KeyboardInterrupt)')
@@ -312,8 +318,8 @@ def execute(registrar, state, task):
         message = "execution error: {}".format(e)
         logger.info(message)
         stderr.write(traceback.format_exc() + "\n")
-        status = mahler.core.status.Broken(str(e))
         # status = mahler.core.status.FailedOver(str(e))
+        raise mahler.core.utils.errors.ExecutionError(str(e)) from e
 
     finally:
         utcnow = datetime.datetime.utcnow()
@@ -395,13 +401,10 @@ def main(tags=tuple(), container=None, working_dir=None, max_tasks=10e10, deplet
                        ToQueuedMaintainer, OnHoldMaintainer]:
         maintainer(tags=tags, container=container, sleep_time=exhaust_wait_time, daemon=True).start()
 
-    import time
-    time.sleep(60 * 10)
-
-    # with tmp_directory(working_dir):
-    #     _main(tags=tags, container=container, max_tasks=max_tasks,
-    #           depletion_patience=depletion_patience, exhaust_wait_time=exhaust_wait_time,
-    #           max_failedover_attempts=max_failedover_attempts)
+    with tmp_directory(working_dir):
+        _main(tags=tags, container=container, max_tasks=max_tasks,
+              depletion_patience=depletion_patience, exhaust_wait_time=exhaust_wait_time,
+              max_failedover_attempts=max_failedover_attempts)
 
 
 def _main(tags=tuple(), container=None, max_tasks=10e10, depletion_patience=12,
@@ -473,27 +476,60 @@ def _main(tags=tuple(), container=None, max_tasks=10e10, depletion_patience=12,
         print('Executing task: {}'.format(task.id))
         assert task.status.name == 'Reserved'
         registrar.update_status(task, mahler.core.status.Running('start execution'))
-        registrar.update_report(task)
+        registrar.update_report(task.to_dict())
         try:
             new_status = execute(registrar, state, task)
-        except BaseException as e:
-            message = "system error: {}".format(e)
-            registrar.update_status(task, mahler.core.status.Broken(message))
-            registrar.update_status(task, mahler.core.status.FailedOver('system error'))
+
+        except mahler.core.utils.errors.SignalSuspend as e:
+            print('Execution of task {} suspended'.format(task.id))
+            print('New status: {}'.format(task.status))
+            continue
+
+        except mahler.core.utils.errors.SignalCancel as e:
+            print('Execution of task {} cancelled'.format(task.id))
+            print('New status: {}'.format(task.status))
+            continue
+
+        except mahler.core.utils.errors.SignalInterrupt as e:
+            new_status = mahler.core.status.Interrupted('Interrupted by system (SIGTERM)')
+            assert task.status.name == 'Running'
+            registrar.update_status(task, new_status)
+            print('Execution of task {} interrupted'.format(task.id))
+            print('New status: {}'.format(new_status))
             raise
 
-        registrar.update_status(task, new_status)
-        print('Executing of task {} stopped'.format(task.id))
-        print('New status: {}'.format(new_status))
+        except mahler.core.utils.errors.ExecutionError as e:
 
-        if isinstance(new_status, mahler.core.status.Broken):
+            new_status = mahler.core.status.Broken(str(e))
+            assert task.status.name == 'Running'
+            registrar.update_status(task, new_status)
+            print('Execution of task {} crashed'.format(task.id))
+
             broke_n_times = sum(int(event['item']['name'] == new_status.name)
                                 for event in task._status.history)
             if broke_n_times < max_failedover_attempts:
-                registrar.update_status(
-                    task, mahler.core.status.FailedOver('Broke {} times'.format(broke_n_times)))
+                new_status = mahler.core.status.FailedOver('Broke {} times'.format(broke_n_times))
+                registrar.update_status(task, new_status)
 
-        registrar.update_report(task)
+            print('New status: {}'.format(new_status))
+
+        except Exception as e:
+            message = "mahler error: {}".format(e)
+            print('Execution of task {} crashed because of problem in mahler'.format(task.id))
+            registrar.update_status(task, mahler.core.status.Broken(message))
+            registrar.update_status(task, mahler.core.status.FailedOver('mahler error'))
+            print('New status: {}'.format(new_status))
+            raise e.__class__(message) from e
+
+        else:
+            assert task.status.name == 'Running'
+            registrar.update_status(task, new_status)
+            print('Execution of task {} stopped'.format(task.id))
+            print('New status: {}'.format(new_status))
+
+        finally:
+            registrar.update_report(task.to_dict())
+
 
         # Use an interface with Kleio to fetch data and save it in lab's db.
         # Could be sacred, comet.ml or WandB...
