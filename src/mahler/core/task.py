@@ -1,4 +1,5 @@
 import copy
+import datetime
 import logging
 import os
 import sys
@@ -161,8 +162,13 @@ class Task(object):
 
     @property
     def resources(self):
-        resources = copy.deepcopy(self.op.resources)
-        resources.update(self._resources)
+        resources = {}
+        if self.op:
+            resources.update(copy.deepcopy(self.op.resources))
+
+        if self._resources:
+            resources.update(self._resources)
+
         return resources
 
     @property
@@ -178,6 +184,69 @@ class Task(object):
     @property
     def priority(self):
         return self._priority.value
+
+    @property
+    def created_on(self):
+        if not self._status.value:
+            return None
+
+        return self._status.history[0]['id'].generation_time
+
+    @property
+    def started_on(self):
+        if not self._status.value:
+            return None
+
+        # TODO: Support interruption, that means there may me other status between runnings
+        found_running = False
+        started_on = None
+        for i, event in enumerate(self._status.history[::-1]):
+            found_running = found_running or event['item']['name'] == 'Running'
+
+            if found_running and event['item']['name'] != 'Running':
+                break
+
+            if found_running:
+                started_on = event['id'].generation_time
+
+        # If not found, started_on is None
+        return started_on
+
+    @property
+    def stopped_on(self):
+        if not self.started_on:
+            return None
+
+        next_status = None
+        found_running = False
+        stopped_on = None
+        for i, event in enumerate(self._status.history[::-1]):
+            if event['item']['name'] == 'Running':
+                break
+
+            next_status = event
+
+        if next_status is None:
+            return event['id'].generation_time
+        
+        return min(next_status['id'].generation_time,
+                   event['id'].generation_time)
+
+    @property
+    def duration(self):
+        if not self.started_on:
+            return None
+
+        # TODO: Support interruption, that means we should compute durations in each
+        #       running sequence. In other words, duration <= (stopped_on - started_on).
+        return (self.stopped_on - self.started_on).total_seconds()
+
+    @property
+    def updated_on(self):
+        if not self._status.value:
+            return None
+
+        return self._status.history[-1]['id'].generation_time
 
     @property
     def status(self):
@@ -201,13 +270,11 @@ class Task(object):
 
     @property
     def stdout(self):
-        # TODO
-        return "\n".join(self._stdout.value)
+        return "".join(self._stdout.value)
 
     @property
     def stderr(self):
-        # TODO
-        return "\n".join(self._stderr.value)
+        return "".join(self._stderr.value)
 
     # None until completion
 
@@ -238,7 +305,7 @@ class Task(object):
         if self._name:
             return self._name
 
-        return self.op.name
+        return self.op.name if self.op else None
 
     def to_dict(self, report=True):
 
@@ -249,13 +316,18 @@ class Task(object):
                 parent=self.parent.id if self.parent else None,
                 dependencies=[task.id for task in self.dependencies]),
             registry=dict(
+                created_on = self.created_on,
+                # started_on is dynamic
+                # stopped_on
+                # updated_on
+                # duration
                 # status is event-sourced
                 # tags is event-sourced
                 container=self.container),
             facility=dict(
                 # host is event-sourced
                 resources=self.resources),
-            op=self.op.to_dict(),
+            op=self.op.to_dict() if self.op else {},
             arguments=self.arguments,
             # stdout is event-sourced
             # stderr is event-sourced
@@ -265,17 +337,52 @@ class Task(object):
         if self.id:
             task_document['id'] = self.id
 
-        if not report:
-            return task_document
-
-        if self.id is None:
+        if report and self.id is None:
             raise RuntimeError("Cannot build report if task is not registered")
 
         report_document = task_document
+
         # TODO:
         # report['bounds']['priority'] = self.priority
-        report_document['registry']['status'] = self.status.name
-        report_document['registry']['tags'] = self.tags
+                # created_on is dynamic
+                # started_on
+                # stopped_on
+                # updated_on
+                # duration
+
+        # reported_on should be the last creation_timestamp of the event sourced attributes.
+        # There is however the risk of having new events coming in since the last of a given
+        # attribute.
+        # Ex: status last event is at time t and is the most recent one, but tag event
+        #     is at time t - delta and not yet in the report. That means report with 
+        #     reported_on is not correct.
+        # Solution:
+        # Global reported_on for simplicity + timestamp for each attribute
+        # reported_on:
+        #     report
+        #     status
+        #     tags
+
+        # It is not possible to register a status at time t - 1 if a status at time t is registered.
+        # This is because the IDs would conflict, to be able to register the status of time t - 1
+        # the status of time t must be known from the process, that means status of time t -1 would
+        # be registered at time t + 1.
+
+        if report:
+            report_document['registry']['started_on'] = self.started_on
+            report_document['registry']['stopped_on'] = self.stopped_on
+            report_document['registry']['updated_on'] = self.updated_on
+            # reported_on is set at registration based on snapshot-event id
+            # report_document['registry']['reported_on'] = datetime.datetime.utcnow()
+            report_document['registry']['duration'] = self.duration
+            report_document['registry']['status'] = self.status.name
+            report_document['registry']['tags'] = self.tags
+
+        report_document['timestamp'] = {
+            'status': self._status.history[-1]['id'] if self._status.history else None,
+            'tags': self._tags.history[-1]['id'] if self._tags.history else None
+            }
+
         # TODO
         # report['facility']['host'] = self.host
 

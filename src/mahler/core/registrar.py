@@ -134,7 +134,7 @@ class Registrar(object):
                             name=None, registrar=self)
 
                 if is_outdated(task, task_document):
-                    self.update_report(task)
+                    self.update_report(task.to_dict())
                     updated += 1
 
         return updated
@@ -159,7 +159,7 @@ class Registrar(object):
                         name=None, registrar=self)
 
             if task.status.name not in status_names:
-                self.update_report(task)
+                self.update_report(task.to_dict())
                 continue
 
             try:
@@ -167,7 +167,7 @@ class Registrar(object):
                     task,
                     mahler.core.status.Queued(
                         're-queue {} task'.format(task_document['registry']['status'])))
-                self.update_report(task)
+                self.update_report(task.to_dict())
             except (ValueError, RaceCondition) as e:
                 logger.debug('Task {} status changed concurrently'.format(task.id))
                 continue
@@ -192,14 +192,14 @@ class Registrar(object):
             task = Task(op=None, arguments=None, id=task_document['id'],
                         name=None, registrar=self)
             if task.status.name != onhold_status.name:
-                self.update_report(task)
+                self.update_report(task.to_dict())
                 continue
 
             # TODO: Implement dependencies and test
             # task._dependencies = task_document['bounds.dependencies']
             try:
                 self.update_status(task, mahler.core.status.Queued('dependencies met'))
-                self.update_report(task)
+                self.update_report(task.to_dict())
             except (ValueError, RaceCondition) as e:
                 logger.debug('Task {} status changed concurrently'.format(task.id))
                 continue
@@ -224,10 +224,21 @@ class Registrar(object):
             task._registrar = self
             self.update_status(task, mahler.core.status.OnHold(message))
             self.add_tags(task, [task.name])
-            self.update_report(task, upsert=True)
+            try:
+                self.update_report(task.to_dict(report=False), upsert=True)
+            except RaceCondition:
+                pass
 
-    def update_report(self, task, upsert=False):
-        self._db.update_report(task, upsert)
+    def update_report(self, task_report, upsert=False):
+        # create event
+        # update report
+        event = self.create_event('snapshot', task_report['id'], task_report.pop('timestamp'))
+        event.pop('inc_id')
+        event.pop('key')
+        # NOTE: There should be no RaceCondition, snapshot events have no unique key
+        self._db.add_event('report.timestamp', event)
+        task_report['registry']['reported_on'] = event['id']
+        self._db.update_report(task_report, upsert)
 
     def retrieve_tasks(self, id=None, tags=tuple(), container=None, status=None, limit=None,
                        use_report=True, _return_doc=False, _projection=None):

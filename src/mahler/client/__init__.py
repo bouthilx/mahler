@@ -25,7 +25,7 @@ class Client(object):
         self.registrar.register_tasks([task])
         # self.change_priority(task, priority)
         self.add_tags(task, tags)
-        self.registrar.update_report(task)
+        self.registrar.update_report(task.to_dict())
         return task
 
     def get_task(self):
