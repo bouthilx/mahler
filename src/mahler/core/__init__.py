@@ -32,6 +32,9 @@ DEF_CONFIG_FILES_PATHS = [
     ]
 
 config = Configuration()
+config.add_option(
+    'heartbeat', type=int, default=60, env_var='MAHLER_HEARTBEAT')
+
 config.registry = Configuration()
 config.registry.add_option(
     'type', type=str, default=None, env_var='MAHLER_REGISTRAR_TYPE')

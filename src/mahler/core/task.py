@@ -5,6 +5,7 @@ import os
 import sys
 
 from mahler.core.attributes import EventBasedItemAttribute, EventBasedListAttribute
+from mahler.core import config
 import mahler.core.status
 
 
@@ -55,7 +56,8 @@ class Task(object):
     Aggressive update schemes for up-to-date views should be used sparingly.
     """
 
-    def __init__(self, op, arguments, id=None, name=None, registrar=None, container=None):
+    def __init__(self, op, arguments, id=None, name=None, registrar=None, container=None, 
+                 heartbeat=config.heartbeat):
         self.op = op
         self._arguments = arguments
         self._name = name
@@ -64,6 +66,7 @@ class Task(object):
         self._container = container
         self._resources = {}
         self.id = id
+        self.heartbeat = int(heartbeat)
         self._priority = EventBasedItemAttribute(self, 'priority')
         self._status = EventBasedItemAttribute(self, 'status')
         self._tags = EventBasedListAttribute(self, 'tags')
@@ -229,8 +232,11 @@ class Task(object):
         if next_status is None:
             return event['id'].generation_time
         
+        # If status changed before next heartbeat, this is the stopped time. Otherwise,
+        # we take last running timestamp + heartbeat, assuming the task was lost and
+        # the gap between running and next status is not reliable.
         return min(next_status['id'].generation_time,
-                   event['id'].generation_time)
+                   event['id'].generation_time + datetime.timedelta(seconds=self.heartbeat))
 
     @property
     def duration(self):
@@ -323,6 +329,7 @@ class Task(object):
                 # duration
                 # status is event-sourced
                 # tags is event-sourced
+                heartbeat=int(self.heartbeat),
                 container=self.container),
             facility=dict(
                 # host is event-sourced

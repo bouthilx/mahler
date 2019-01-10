@@ -209,7 +209,48 @@ class Registrar(object):
         return updated
 
     def maintain_lost(self, tags, container=None, limit=100):
-        return 0
+        perishable_status = [mahler.core.status.Reserved(''),
+                             mahler.core.status.Running('')]
+
+        status_names = [status.name for status in perishable_status]
+
+        updated = 0
+
+        projection = {'id': 1, 'registry.heartbeat': 1}
+
+        task_iterator = self.retrieve_tasks(
+            tags=tags, container=container, status=perishable_status, limit=limit,
+            _return_doc=True, _projection=projection)
+
+        for task_document in task_iterator:
+            task = Task(op=None, arguments=None, id=task_document['id'],
+                        name=None, registrar=self)
+            if task.status.name not in status_names:
+                self.update_report(task.to_dict())
+                continue
+
+            heartbeat_frequency = task_document['registry']['heartbeat']
+
+            last_heartbeat = task._status.history[-1]['id'].generation_time
+            now = datetime.datetime.now(datetime.timezone.utc)
+            time_since_heartbeat = (now - last_heartbeat).total_seconds()
+            if time_since_heartbeat < 2 * heartbeat_frequency:
+                continue
+
+            message = 'Lost heartbeat since {:0.02f}s ({:0.02f} x heartbeat)'.format(
+                time_since_heartbeat, time_since_heartbeat / heartbeat_frequency)
+            new_status = mahler.core.status.FailedOver(message)
+            try:
+                self.update_status(task, new_status)
+            except (ValueError, RaceCondition) as e:
+                logger.debug('Task {} status changed concurrently'.format(task_document['id']))
+                continue
+            else:
+                self.update_report(task.to_dict())
+
+            updated += 1
+
+        return updated
 
     def register_tasks(self, tasks, message='new task'):
         """
