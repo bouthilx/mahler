@@ -6,10 +6,10 @@ class EventBasedAttribute(object):
     """
     {
         _id:
-        creation_timestamp:
+        task_id:
+        inc_id:
+        key:
         runtime_timestamp:
-        trial_id:
-        creator_id:
         item:{
         }
     }
@@ -52,14 +52,14 @@ class EventBasedAttribute(object):
         if not self.history:
             return 0
 
-        return int(self.history[-1]['id'])
+        return int(self.history[-1]['inc_id'])
 
     def refresh(self):
         if self.task._registrar:
             # self.history = self.task._registrar.retrieve_status(self.task)
             self.history = list(
                 sorted(self.task._registrar._db.retrieve_events(self.name, self.task),
-                       key=lambda event: event['creation_timestamp']))
+                       key=lambda event: event['id'].generation_time))
         # query = {"trial_id": self._trial_id}
         # lower_bound, upper_bound = self._interval
         # if (self.history and
