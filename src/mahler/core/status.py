@@ -80,10 +80,10 @@ class OnHold(Status):
     """
     @property
     def follows(self):
-        return [None, Suspended]
+        return [None, Suspended, Cancelled]
 
     def can_follow(self, status):
-        return isinstance(status, Suspended) or status is None
+        return any(isinstance(status, s) for s in self.follows[1:]) or status is None
 
 
 class Queued(Status):
@@ -135,7 +135,7 @@ class Suspended(Status):
     """
     @property
     def follows(self):
-        return [OnHold, Reserved, Running]
+        return [OnHold, Queued, Reserved, Running, Cancelled]
 
 
 class Broken(Status):
@@ -151,7 +151,7 @@ class FailedOver(Status):
     """
     @property
     def follows(self):
-        return [Reserved, Broken]
+        return [Reserved, Running, Broken]
 
 
 class Acknowledged(Status):
@@ -159,7 +159,7 @@ class Acknowledged(Status):
     """
     @property
     def follows(self):
-        return [Broken]
+        return [Broken, FailedOver]
 
 
 class SwitchedOver(Status):
@@ -175,7 +175,8 @@ class Cancelled(Status):
     """
     @property
     def follows(self):
-        return [OnHold, Reserved, Running]
+        return [OnHold, Queued, SwitchedOver, FailedOver, Broken, Reserved, Running, Acknowledged,
+                Suspended, Interrupted]
 
 
 def is_running(task, local=False):
