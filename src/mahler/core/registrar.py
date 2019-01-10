@@ -55,21 +55,25 @@ class Registrar(object):
         self._db = db
 
     @classmethod
-    def create_event(cls, event_type, item, timestamp=None, creator=None, ref_id=None):
-        creation_timestamp = datetime.datetime.utcnow()
-        runtime_timestamp = timestamp if timestamp else creation_timestamp
+    def create_event(cls, event_type, task_id, item, timestamp=None, creator=None, ref_id=None):
+        if timestamp is None:
+            timestamp = datetime.datetime.utcnow()
 
-        if not isinstance(runtime_timestamp, datetime.datetime):
+        if not isinstance(timestamp, datetime.datetime):
             raise TypeError(
-                "Timestamp must be of type datetime.datetime, not '{}'".format(
-                    type(runtime_timestamp)))
+                "timestamp must be of type datetime.datetime, not '{}'".format(
+                    type(timestamp)))
+
+        inc_id = ref_id + 1 if ref_id else 1
 
         event = {
-            'id': ref_id + 1 if ref_id else 1,
+            'task_id': task_id,
+            'inc_id': inc_id,
+            'key': "{}.{}".format(str(task_id), inc_id),
             'item': item,
             'type': event_type,
-            'creation_timestamp': creation_timestamp,
-            'runtime_timestamp': runtime_timestamp
+            # 'creation_timestamp': creation_timestamp,
+            'runtime_timestamp': timestamp
         }
 
         return event
@@ -267,14 +271,13 @@ class Registrar(object):
                                  current_status, status))
 
         event = self.create_event(
-            'set', status.to_dict(), ref_id=current_status.id if current_status else None)
-        event['task_id'] = task.id
-        # TODO: What is creator?
-        event['creator_id'] = task.id
+            'set', task.id, status.to_dict(), ref_id=current_status.id if current_status else None)
         # Fail if another process changed the status meanwhile
         # if ref_id + 1 exist:
         #     raise RaceCondition(Current status was not the most recent one)
         db_operation = self._db.add_event('status', event)
+        task._status.history.append(event)
+
 
     def retrieve_status(self, task):
         return self._db.retrieve_events('status', task)
@@ -286,29 +289,25 @@ class Registrar(object):
 
     def update_stdout(self, task, stdout):
         # TODO: Fetch host and PID and set
-        assert mahler.core.status.is_running(task, local=True)
-        ref_id = task._stdout.history[-1]['id'] if task._stdout.history else None
-        event = self.create_event('add', stdout, ref_id=ref_id)
-        event['task_id'] = task.id
-        # TODO: What is creator?
-        event['creator_id'] = task.id
+        # assert mahler.core.status.is_running(task, local=True)
+        ref_id = task._stdout.history[-1]['inc_id'] if task._stdout.history else None
+        event = self.create_event('add', task.id, stdout, ref_id=ref_id)
         # Fail if another process changed the status meanwhile
         # if ref_id + 1 exist:
         #     raise RaceCondition(Current status was not the most recent one)
         db_operation = self._db.add_event('stdout', event)
+        task._stdout.history.append(event)
 
     def update_stderr(self, task, stderr):
         # TODO: Fetch host and PID and set
-        assert mahler.core.status.is_running(task, local=True)
-        ref_id = task._stderr.history[-1]['id'] if task._stderr.history else None
-        event = self.create_event('add', stderr, ref_id=ref_id)
-        event['task_id'] = task.id
-        # TODO: What is creator?
-        event['creator_id'] = task.id
+        # assert mahler.core.status.is_running(task, local=True)
+        ref_id = task._stderr.history[-1]['inc_id'] if task._stderr.history else None
+        event = self.create_event('add', task.id, stderr, ref_id=ref_id)
         # Fail if another process changed the status meanwhile
         # if ref_id + 1 exist:
         #     raise RaceCondition(Current status was not the most recent one)
         db_operation = self._db.add_event('stderr', event)
+        task._stderr.history.append(event)
 
     def add_tags(self, task, tags, message=''):
         for tag in tags:
@@ -317,15 +316,10 @@ class Registrar(object):
                     tag, task.id))
                 continue
 
-            ref_id = task._tags.history[-1]['id'] if task.tags else None
-            ref_id = self._add_tag(task, tag, message, ref_id=ref_id)
-            # task._tags.refresh()
-
-    def _add_tag(self, task, tag, message, ref_id=None):
-        event = self.create_event('add', dict(tag=tag, message=message), ref_id=ref_id)
-        event['task_id'] = task.id
-        event['creator_id'] = task.id
-        self._db.add_event('tags', event)
+            ref_id = task._tags.history[-1]['inc_id'] if task.tags else None
+            event = self.create_event('add', task.id, dict(tag=tag, message=message), ref_id=ref_id)
+            self._db.add_event('tags', event)
+            task._tags.history.append(event)
 
     def remove_tags(self, task, tags, message=''):
         for tag in tags:
@@ -334,10 +328,11 @@ class Registrar(object):
                     "Cannot remove tag {}, it does not belong to task {}".format(
                         tag, task.id))
 
-            event = self.create_event('remove', dict(tag=tag, message=message))
-            event['task_id'] = task.id
-            event['creator_id'] = task.id
+            ref_id = task._tags.history[-1]['inc_id'] if task.tags else None
+            event = self.create_event('remove', task.id, dict(tag=tag, message=message),
+                                      ref_id=ref_id)
             self._db.add_event('tags', event)
+            task._tags.history.append(event)
 
     def retrieve_tags(self, task):
         return self._db.retrieve_events('tags', task)
