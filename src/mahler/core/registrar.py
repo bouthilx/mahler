@@ -100,6 +100,23 @@ class Registrar(object):
 
         return updated
 
+    def maintain_unreported(self, limit=100):
+
+        # Querying from immutable cores
+        for task_document in self.retrieve_tasks(_return_doc=True):
+            # Looking for a report
+            report_iterator = self.retrieve_tasks(id=task_document['id'], _return_doc=True,
+                                                  _projection={'id': 1})
+            if sum(1 for _ in report_iterator) < 1:
+                logger.info('Adding missing report for {}'.format(task_document['id']))
+
+                operator = Operator(**task_document['op'])
+                task = Task(operator, arguments=task_document['arguments'], id=task_document['id'],
+                            name=task_document['name'], registrar=self)
+                task._container = task_document['registry']['container']
+
+                self.update_report(task.to_dict(), upsert=True)
+
     def maintain_reports(self, tags, container=None, limit=100):
         updated = 0
         volatile_status = [mahler.core.status.Queued(''),
