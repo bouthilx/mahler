@@ -59,25 +59,25 @@ def main(args):
     working_dir = args['working_dir']
     registrar = mahler.core.registrar.build()
     ressources = mahler.core.resources.build(type=args['scheduler'], **args)
-    logger.info('Maintaining tags')
-    registrar.maintain(tags)
     logger.info('Retrieving tasks')
-    tasks = registrar.retrieve_tasks(tags=tags, container=container,
-                                     status=mahler.core.status.Queued(''))
+    task_documents = registrar.retrieve_tasks(
+        tags=tags, container=container, status=mahler.core.status.Queued(''),
+        _return_doc=True, _projection={'registry.container': 1})
+
     task_per_container = dict()
-    for task in tasks:
-        container = task.container if task.container else None
+    for task_document in task_documents:
+        container = task_document.get('registry', {}).get('container', None)
         if container not in task_per_container:
             task_per_container[container] = []
 
-        task_per_container[container].append(task)
+        task_per_container[container].append(task_document['id'])
 
     logger.info(
         '{} tasks available:\n{}'.format(
-            sum(len(tasks) for tasks in task_per_container.values()),
+            sum(len(task_ids) for task_ids in task_per_container.values()),
             "\n".join(
-                '{}: {}'.format(tasks_container, len(tasks))
-                for tasks_container, tasks in task_per_container.items())))
+                '{}: {}'.format(tasks_container, len(task_ids))
+                for tasks_container, task_ids in task_per_container.items())))
 
     if not task_per_container:
         return
@@ -91,9 +91,9 @@ def main(args):
     # TODO: Divide fair share between containers. If first workers are all on the same container
     #       they may quickly exhaust the queue for this specific container and we will end up
     #       with no workers.
-    for tasks_container, tasks in task_per_container.items():
+    for tasks_container, task_ids in task_per_container.items():
         available_resources = ressources.available()
         logger.info('{} nodes available'.format(available_resources))
         if available_resources:
-            ressources.submit(tasks + any_container, container=tasks_container, tags=tags,
+            ressources.submit(task_ids + any_container, container=tasks_container, tags=tags,
                               working_dir=working_dir)
