@@ -320,7 +320,10 @@ class Registrar(object):
         """
         """
         # TODO: Fetch host and PID and set
-        return self.update_status(task, mahler.core.status.Reserved(message))
+        current_status = task.status
+        if not isinstance(current_status, mahler.core.status.Queued):
+            raise ValueError("Task with status {} cannot be reserved".format(current_status))
+        return self.update_status(task, mahler.core.status.Reserved(message), current_status)
 
     # def update_priority(self, task, priority):
     #     # TODO: Create timestamp
@@ -330,9 +333,15 @@ class Registrar(object):
     #         raise RaceCondition("Cannot change priority")
     #     db.table('tasks.priorities').insert()
 
-    def update_status(self, task, status):
-        # TODO: Create timestamp
-        current_status = task.status
+    def update_status(self, task, status, current_status=None):
+        # Avoid fresh status, update_status execution was intended based on a status
+        # that may be different than the most recent one, we don't want to test based on a
+        # different one..
+        if current_status is None and task._status.history:
+            last_status_event = task._status.history[-1]
+            current_status = mahler.core.status.build(**last_status_event['item'])
+            current_status.id = last_status_event['inc_id']
+
         if current_status is None and not isinstance(status, mahler.core.status.OnHold):
             raise ValueError("Task was not fully initialized yet, cannot set status: {}".format(
                                  status))
@@ -410,13 +419,13 @@ class Registrar(object):
 
     def set_output(self, task, output):
         # TODO: Check status as well as process ID
-        assert mahler.core.status.is_running(task, local=True)
+        # assert mahler.core.status.is_running(task, local=True)
         # TODO: Implement...
         self._db.set_output(task, output)
 
     def set_volume(self, task, volume):
         # TODO: Check status as well as process ID
-        assert mahler.core.status.is_running(task, local=True)
+        # assert mahler.core.status.is_running(task, local=True)
         self._db.set_volume(task, volume)
 
     def retrieve_output(self, task):
