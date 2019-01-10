@@ -4,3 +4,7 @@ class SignalCancel(Exception):
 
 class SignalInterrupt(Exception):
     pass
+
+
+class RaceCondition(Exception):
+    pass

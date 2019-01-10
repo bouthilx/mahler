@@ -15,6 +15,7 @@ import pprint
 from mahler.core import config
 from mahler.core.task import Task
 from mahler.core.operator import Operator
+from mahler.core.utils.errors import RaceCondition
 import mahler.core.status
 
 
@@ -404,7 +405,3 @@ def load_config(**kwargs):
 
     mahler.core.config.registry[registry_type] = plugin.define_config()
     plugin.parse_config_files(mahler.core.config.registry[registry_type])
-
-
-class RaceCondition(Exception):
-    pass
