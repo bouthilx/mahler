@@ -139,7 +139,8 @@ class Registrar(object):
 
         for status_family in [volatile_status, queueable_status, mutable_status]:
 
-            limit -= updated
+            if limit:
+                limit -= updated
             
             task_iterator = self.retrieve_tasks(
                 tags=tags, container=container, status=status_family, limit=limit,
