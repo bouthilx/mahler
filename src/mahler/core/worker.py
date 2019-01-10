@@ -1,16 +1,14 @@
 import asyncio
-import multiprocessing as mp
-import random
-import time
-
 import contextlib
 import datetime
 import io
 import logging
+import multiprocessing as mp
 import os
+import random
 import time
-import sys
 import traceback
+import sys
 import weakref
 
 from mahler.core.utils.std import stdredirect
@@ -22,6 +20,8 @@ logger = logging.getLogger('mahler.core.worker')
 # TODO: If in debug mode,
 #       when code change is detected, interrupt process and start over the worker with
 #       up-to-date code.
+#       In debug mode, if execution fails, stop with pdb. If user wants to continue, enter `c`
+#       else, if the user make a modification, worker is reloaded and same task is retried.
 
 STOPPING_TEMPLATE = '---\nStopping execution: {}\n---\n'
 STARTING_TEMPLATE = '---\nStarting execution: {}\n---\n'
@@ -66,6 +66,10 @@ class Stream():
             self.lines.append(text)
             n_chars = len(text)
 
+        # TODO: NO! The purpose of Stream is not to redirect the stdout, it is just to 
+        #       catch what comes in the stream, and log it as the same time as let the
+        #       info pass to the stream.
+        #       write(text) -> log(text) -> stream.write(text)
         if logger.isEnabledFor(logging.INFO):
             self.stdout.write(text)
 
@@ -105,32 +109,90 @@ class Stream():
         raise NotImplementedError()
 
 
-async def heartbeat(registrar, task, loop, future, frequence=60):
-    logger = logging.getLogger(__name__ + ".heartbeat")
-    logger.addHandler(logging.StreamHandler(sys.stdout))
+class TaskProcess(mahler.core.utils.errors.ProcessExceptionHandler):
+    def __init__(self, task_id, state, stdout, stderr, data, volume, **kwargs):
+        self.task_id = task_id
+        self.state = state
+        self.stdout = stdout
+        self.stderr = stderr
+        self.data = data
+        self.volume = volume 
+        super(TaskProcess, self).__init__(**kwargs)
 
-    heartbeat_status = mahler.core.status.Running('heartbeat')
+    def try_catch_run(self):
+        registrar = mahler.core.registrar.build(name='mongodb')
+        task = next(iter(registrar.retrieve_tasks(id=self.task_id)))
+        print('running')
+        data, volume = task.run(self.state, stdout=sys.stdout, stderr=sys.stderr)
+        # TODO: Why nothing is passed?
+        print(data)
+        print(volume)
+        if data:
+            self.data.update(data)
+        if volume:
+            self.volume.update(volume)
 
-    while not future.done():
-        await asyncio.sleep(frequence)
-        try:
-            registrar.update_status(task, heartbeat_status)
-        except (ValueError, RaceCondition) as e:
-            new_status = task.status
-            if isinstance(new_status, mahler.core.status.Suspended):
-                raise mahler.core.utils.errors.SignalSuspend(
-                    'Task suspended remotely: {}'.format(new_status.message))
-            elif isinstance(new_status, mahler.core.status.Cancelled):
-                raise mahler.core.utils.errors.SignalCancel(
-                    'Task cancelled remotely: {}'.format(new_status.message))
-            else:
-                raise
-        except concurrent.futures.CancelledError:
-            break
-        finally:
-            registrar.update_report(task)
+    # def get_data(self):
+    #     data = dict()
+    #     data.update(self.data)
+    #     return data
 
-    loop.stop()
+    # def get_volume(self):
+    #     volume = dict()
+    #     volume.update(self.volume)
+    #     return volume
+
+
+class HeartBeatProcess(mahler.core.utils.errors.ProcessExceptionHandler):
+    def __init__(self, task_id, **kwargs):
+        self.task_id = task_id
+        self.logger = logging.getLogger(__name__ + ".heartbeat")
+        stream_handler = logging.StreamHandler(sys.stdout)
+        stream_handler.setFormatter(logging.getLogger().handlers[0].formatter)
+        self.logger.addHandler(stream_handler)
+        super(HeartBeatProcess, self).__init__(**kwargs)
+
+    def try_catch_run(self):
+        registrar = mahler.core.registrar.build(name='mongodb')
+        task = next(iter(registrar.retrieve_tasks(id=self.task_id)))
+        task._status.refresh()
+
+        heartbeat_status = mahler.core.status.Running('heartbeat')
+
+        # while not self.stop.is_set():
+        while True:
+            slept = 0
+            try:
+                while True:
+                    time_to_sleep = min(task.heartbeat - slept, 5)
+                    time.sleep(time_to_sleep)
+                    slept += time_to_sleep
+                    
+                    if slept >= task.heartbeat:
+                        break
+
+                    # TODO: Replace this with observers on database
+                    #       ex: tailable cursors in MongoDB
+                    #       https://docs.mongodb.com/manual/core/tailable-cursors/
+                    new_status = task.status
+                    if new_status.name == 'Suspended':
+                        raise mahler.core.utils.errors.RaceCondition('Suspended remotely')
+                    elif task.status.name == 'Cancelled':
+                        raise mahler.core.utils.errors.RaceCondition('Cancelled remotely')
+
+                registrar.update_status(task, heartbeat_status)
+            except mahler.core.utils.errors.RaceCondition as e:
+                new_status = task.status
+                if isinstance(new_status, mahler.core.status.Suspended):
+                    raise mahler.core.utils.errors.SignalSuspend(
+                        'Task suspended remotely: {}'.format(new_status.message))
+                elif isinstance(new_status, mahler.core.status.Cancelled):
+                    raise mahler.core.utils.errors.SignalCancel(
+                        'Task cancelled remotely: {}'.format(new_status.message))
+                else:
+                    raise
+            finally:
+                registrar.update_report(task.to_dict())
 
 
 # NOTE: asyncio cannot work because task.run does not use asyncio, hence it never leaves the
@@ -147,21 +209,58 @@ async def async_run(task, state, stdout, stderr, future):
 
 
 def run(registrar, task, state, stdout, stderr):
-    loop = asyncio.get_event_loop()
 
-    future_completion = asyncio.Future()
+    # Build hearbeat process
 
-    # Start concurrent heartbeat
-    asyncio.ensure_future(heartbeat(registrar, task,  loop, future_completion, frequence=60))
-    asyncio.ensure_future(async_run(task, state, stdout, stderr, future_completion))
+    # Build run process
+    # If run process raises an error
+    #     catch here, process
+    # if heartbeat raises an error
+    #     catch here, process, terminate run
+    # finally:
+    #     stop heartbeat
 
-    try:
-        loop.run_forever()
-    finally:
-        loop.close()
+    manager = mp.Manager()
+
+    heartbeat = HeartBeatProcess(task.id)
+    heartbeat.start()
+
+    task_thread = TaskProcess(task.id, state, stdout, stderr, manager.dict(), manager.dict())
+    task_thread.start()
+
+    # what the hell, both are instantly dead!?!?
+    print(time.time())
+    while heartbeat.is_alive() and task_thread.is_alive():
+        time.sleep(0.1)
+    # If heartbeat fails, it probably means the status was changed remotely. We 
+    # kill the task and ignore any possible errors that occured concurrently, the remote
+    # status change is what we keep.
+    if not heartbeat.is_alive():
+        task_thread.terminate()
+
+        # Will raise the error
+        heartbeat.join()
+
+    if not task_thread.is_alive():
+        heartbeat.terminate()
+
+        # Will raise the error
+        task_thread.join()
+
+    data = dict()
+    data.update(task_thread.data)
+
+    volume = dict()
+    volume.update(task_thread.volume)
+
+    return data, volume
 
 
 def execute(registrar, state, task):
+
+    # Load in
+    task._stdout.refresh()
+    task._stderr.refresh()
 
     sysstdout = sys.stdout
     def flush_stdout(text):
@@ -191,7 +290,9 @@ def execute(registrar, state, task):
     stderr.write(STARTING_TEMPLATE.format(utcnow) + "\n")
 
     try:
-        run(registrar, task, state, stdout, stderr)
+        data, volume = run(registrar, task, state, stdout, stderr)
+        print(data)
+        print(volume)
         logger.debug('Saving output')
         registrar.set_output(task, data)
         logger.debug('Output saved')
