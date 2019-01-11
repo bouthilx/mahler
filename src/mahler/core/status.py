@@ -167,7 +167,7 @@ class SwitchedOver(Status):
     """
     @property
     def follows(self):
-        return [Acknowledged]
+        return [Acknowledged, Broken]
 
 
 class Cancelled(Status):
