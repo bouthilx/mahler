@@ -190,10 +190,7 @@ class Task(object):
 
     @property
     def created_on(self):
-        if not self._status.value:
-            return None
-
-        return self._status.history[0]['id'].generation_time
+        return self.id.generation_time
 
     @property
     def started_on(self):
@@ -322,7 +319,6 @@ class Task(object):
                 parent=self.parent.id if self.parent else None,
                 dependencies=[task.id for task in self.dependencies]),
             registry=dict(
-                created_on = self.created_on,
                 # started_on is dynamic
                 # stopped_on
                 # updated_on
@@ -351,8 +347,7 @@ class Task(object):
 
         # TODO:
         # report['bounds']['priority'] = self.priority
-                # created_on is dynamic
-                # started_on
+                # started_on is dynamic
                 # stopped_on
                 # updated_on
                 # duration
