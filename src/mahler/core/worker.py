@@ -5,6 +5,7 @@ import io
 import logging
 import multiprocessing as mp
 import os
+import queue
 import random
 import time
 import traceback
@@ -49,11 +50,11 @@ def tmp_directory(working_dir=None):
         os.chdir(curdir)
 
 
-class Stream():
-    def __init__(self, flush_fct, buffer_size=50):
-        self.stdout = sys.stdout
-        self.stderr = sys.stderr
-        self.flush_fct = flush_fct
+class StdQueue():
+    def __init__(self, queue, stream, mute=False, buffer_size=50):
+        self.queue = queue
+        self.stream = stream
+        self.mute= mute
         self.buffer_size = buffer_size
         self.lines = []
 
@@ -66,12 +67,8 @@ class Stream():
             self.lines.append(text)
             n_chars = len(text)
 
-        # TODO: NO! The purpose of Stream is not to redirect the stdout, it is just to 
-        #       catch what comes in the stream, and log it as the same time as let the
-        #       info pass to the stream.
-        #       write(text) -> log(text) -> stream.write(text)
-        if logger.isEnabledFor(logging.INFO):
-            self.stdout.write(text)
+        if not self.mute:
+            self.stream.write(text)
 
         return n_chars
 
@@ -87,10 +84,7 @@ class Stream():
         return len(line) + 1
 
     def flush(self):
-        # Make sure the flush_fct is not writing to this objects, otherwise it would cause an
-        # infinite recursion.
-        with stdredirect(self.stdout, self.stderr):
-            self.flush_fct(''.join(self.lines))
+        self.queue.put(''.join(self.lines))
         self.lines = []
 
     def close(self):
@@ -122,25 +116,11 @@ class TaskProcess(mahler.core.utils.errors.ProcessExceptionHandler):
     def try_catch_run(self):
         registrar = mahler.core.registrar.build(name='mongodb')
         task = next(iter(registrar.retrieve_tasks(id=self.task_id)))
-        print('running')
-        data, volume = task.run(self.state, stdout=sys.stdout, stderr=sys.stderr)
-        # TODO: Why nothing is passed?
-        print(data)
-        print(volume)
+        data, volume = task.run(self.state, stdout=self.stdout, stderr=self.stderr)
         if data:
             self.data.update(data)
         if volume:
             self.volume.update(volume)
-
-    # def get_data(self):
-    #     data = dict()
-    #     data.update(self.data)
-    #     return data
-
-    # def get_volume(self):
-    #     volume = dict()
-    #     volume.update(self.volume)
-    #     return volume
 
 
 class HeartBeatProcess(mahler.core.utils.errors.ProcessExceptionHandler):
@@ -195,63 +175,68 @@ class HeartBeatProcess(mahler.core.utils.errors.ProcessExceptionHandler):
                 registrar.update_report(task.to_dict())
 
 
-# NOTE: asyncio cannot work because task.run does not use asyncio, hence it never leaves the
-#       computation resources to hearbeat during execution. What should be done, is to execute the
-#       run in another process. The same will be done with the hearbeat, with a result object
-#       to store a message, Cancel, Suspend, or Error.
-
-
-async def async_run(task, state, stdout, stderr, future):
-    logger.info('Starting execution')
-    data, volume = task.run(state, stdout=stdout, stderr=stderr)
-    logger.info('Execution completed')
-    future.set_result(True)
-
-
 def run(registrar, task, state, stdout, stderr):
-
-    # Build hearbeat process
-
-    # Build run process
-    # If run process raises an error
-    #     catch here, process
-    # if heartbeat raises an error
-    #     catch here, process, terminate run
-    # finally:
-    #     stop heartbeat
-
-    manager = mp.Manager()
 
     heartbeat = HeartBeatProcess(task.id)
     heartbeat.start()
 
-    task_thread = TaskProcess(task.id, state, stdout, stderr, manager.dict(), manager.dict())
-    task_thread.start()
+    with mp.Manager() as manager:
 
-    # what the hell, both are instantly dead!?!?
-    print(time.time())
-    while heartbeat.is_alive() and task_thread.is_alive():
-        time.sleep(0.1)
-    # If heartbeat fails, it probably means the status was changed remotely. We 
-    # kill the task and ignore any possible errors that occured concurrently, the remote
-    # status change is what we keep.
-    if not heartbeat.is_alive():
-        task_thread.terminate()
+        stdout_queue = manager.Queue()
+        stderr_queue = manager.Queue()
 
-        # Will raise the error
-        heartbeat.join()
+        stdout = StdQueue(stdout_queue, sys.stdout, mute=not logger.isEnabledFor(logging.INFO),
+                          buffer_size=5)
+        stderr = StdQueue(stderr_queue, sys.stderr, mute=not logger.isEnabledFor(logging.INFO),
+                          buffer_size=5)
 
-    if not task_thread.is_alive():
-        heartbeat.terminate()
+        data = manager.dict()
+        volume = manager.dict()
 
-        # Will raise the error
-        task_thread.join()
+        try:
+            task_thread = TaskProcess(task.id, state, stdout, stderr, data, volume)
+            task_thread.start()
 
-    data = dict()
-    data.update(task_thread.data)
+            while heartbeat.is_alive() and task_thread.is_alive():
+                while not stdout_queue.empty():
+                    try:
+                        registrar.update_stdout(task, stdout_queue.get(timeout=1))
+                    except queue.Empty as e:
+                        pass
 
-    volume = dict()
-    volume.update(task_thread.volume)
+                    try:
+                        registrar.update_stderr(task, stderr_queue.get(timeout=1))
+                    except queue.Empty as e:
+                        pass
+
+            # If heartbeat fails, it probably means the status was changed remotely. We 
+            # terminate the task and ignore any possible errors that occured concurrently, the
+            # remote status change is what we keep.
+            if not heartbeat.is_alive():
+                task_thread.terminate()
+
+                # Will raise the error
+                heartbeat.join()
+
+            if not task_thread.is_alive():
+                heartbeat.terminate()
+
+                # Will raise the error
+                task_thread.join()
+
+            data = dict()
+            data.update(task_thread.data)
+
+            volume = dict()
+            volume.update(task_thread.volume)
+        finally:
+            stdout.flush()
+            while not stdout_queue.empty():
+                registrar.update_stdout(task, stdout_queue.get(timeout=1))
+
+            stderr.flush()
+            while not stderr_queue.empty():
+                registrar.update_stderr(task, stderr_queue.get(timeout=1))
 
     return data, volume
 
@@ -262,37 +247,13 @@ def execute(registrar, state, task):
     task._stdout.refresh()
     task._stderr.refresh()
 
-    sysstdout = sys.stdout
-    def flush_stdout(text):
-        try:
-            registrar.update_stdout(task, text)
-        except mahler.core.registrar.RaceCondition as e:
-            sysstdout.write("\n" * 10)
-            sysstdout.write(str(e))
-            task._stdout.refresh()
-            sysstdout.write("\n" * 10)
-            registrar.update_stdout(task, text)
-
-    def flush_stderr(text):
-        try:
-            registrar.update_stderr(task, text)
-        except mahler.core.registrar.RaceCondition as e:
-            task._stderr.refresh()
-            registrar.update_stderr(task, text)
-
-    stdout = io.StringIO()
-    stderr = io.StringIO()
-    # stdout = Stream(flush_stdout)
-    # stderr = Stream(flush_stderr)
-
     utcnow = datetime.datetime.utcnow()
-    stdout.write(STARTING_TEMPLATE.format(utcnow) + "\n")
-    stderr.write(STARTING_TEMPLATE.format(utcnow) + "\n")
+
+    registrar.update_stdout(task, STARTING_TEMPLATE.format(utcnow) + "\n")
+    registrar.update_stderr(task, STARTING_TEMPLATE.format(utcnow) + "\n")
 
     try:
-        data, volume = run(registrar, task, state, stdout, stderr)
-        print(data)
-        print(volume)
+        data, volume = run(registrar, task, state, sys.stdout, sys.stderr)
         logger.debug('Saving output')
         registrar.set_output(task, data)
         logger.debug('Output saved')
@@ -317,21 +278,14 @@ def execute(registrar, state, task):
         # broken
         message = "execution error: {}".format(e)
         logger.info(message)
-        stderr.write(traceback.format_exc() + "\n")
+        registrar.update_stderr(task, traceback.format_exc() + "\n")
         # status = mahler.core.status.FailedOver(str(e))
         raise mahler.core.utils.errors.ExecutionError(str(e)) from e
 
     finally:
         utcnow = datetime.datetime.utcnow()
-        stdout.write(STOPPING_TEMPLATE.format(utcnow) + "\n")
-        stderr.write(STOPPING_TEMPLATE.format(utcnow) + "\n")
-        registrar.update_stdout(task, stdout.getvalue())
-        registrar.update_stderr(task, stderr.getvalue())
-        print(task.stdout)
-        print(task.stderr)
-
-        # stdout.flush()
-        # stderr.flush()
+        registrar.update_stdout(task, STARTING_TEMPLATE.format(utcnow) + "\n")
+        registrar.update_stderr(task, STARTING_TEMPLATE.format(utcnow) + "\n")
 
     # TODO
     # NOTE: storage.write adds volume links to the registry.
@@ -516,8 +470,10 @@ def _main(tags=tuple(), container=None, max_tasks=10e10, depletion_patience=12,
         except Exception as e:
             message = "mahler error: {}".format(e)
             print('Execution of task {} crashed because of problem in mahler'.format(task.id))
-            registrar.update_status(task, mahler.core.status.Broken(message))
-            registrar.update_status(task, mahler.core.status.FailedOver('mahler error'))
+            new_status = mahler.core.status.Broken(message)
+            registrar.update_status(task, new_status)
+            new_status = mahler.core.status.FailedOver('mahler error')
+            registrar.update_status(task, new_status)
             print('New status: {}'.format(new_status))
             raise e.__class__(message) from e
 
