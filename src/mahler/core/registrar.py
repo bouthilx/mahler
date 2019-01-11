@@ -102,14 +102,25 @@ class Registrar(object):
 
     def maintain_unreported(self, limit=100):
 
+        projection = {'arguments': 1, 'name': 1, 'id': 1, 'op': 1,
+                      'registry': 1}
+
         # Querying from immutable cores
-        for task_document in self.retrieve_tasks(_return_doc=True):
+        for task_document in self.retrieve_tasks(_return_doc=True, _projection=projection):
+            # First make sure the task was registered long enough that it is worth looking for a
+            # report
+            heartbeat_frequency = task_document['registry']['heartbeat']
+            created_on = task_document['id'].generation_time
+            now = datetime.datetime.now(datetime.timezone.utc)
+            time_since_creation = (now - last_heartbeat).total_seconds()
+            if time_since_creation < 2 * heartbeat_frequency:
+                continue
+
             # Looking for a report
             report_iterator = self.retrieve_tasks(id=task_document['id'], _return_doc=True,
                                                   _projection={'id': 1})
             if sum(1 for _ in report_iterator) < 1:
                 logger.info('Adding missing report for {}'.format(task_document['id']))
-
                 operator = Operator(**task_document['op'])
                 task = Task(operator, arguments=task_document['arguments'], id=task_document['id'],
                             name=task_document['name'], registrar=self)
