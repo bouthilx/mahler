@@ -46,7 +46,8 @@ setup_args = dict(
         'cli': [
             'schedule = mahler.cli.schedule:build',
             'worker = mahler.cli.worker:build',
-            'dashboard = mahler.cli.dashboard:build'
+            'dashboard = mahler.cli.dashboard:build',
+            'registry = mahler.cli.registry:build'
         ],
     },
     # "Zipped eggs don't play nicely with namespace packaging"
