@@ -383,9 +383,6 @@ class OnHoldMaintainer(Maintainer):
 def main(tags=tuple(), container=None, working_dir=None, max_tasks=10e10, depletion_patience=10,
          exhaust_wait_time=20, max_failedover_attempts=3, **kwargs):
 
-    for maintainer in [UnreportedMaintainer, ReportMaintainer, LostTaskMaintainer,
-                       ToQueuedMaintainer, OnHoldMaintainer]:
-        maintainer(tags=tags, container=container, sleep_time=exhaust_wait_time, daemon=True).start()
 
     with tmp_directory(working_dir):
         _main(tags=tags, container=container, max_tasks=max_tasks,
