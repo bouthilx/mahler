@@ -468,6 +468,35 @@ def _main(tags=tuple(), container=None, max_tasks=10e10, depletion_patience=12,
         try:
             new_status = execute(registrar, state, task)
 
+        except KeyboardInterrupt as e:
+            try:
+                print('Execution of task {} suspended by user (KeyboardInterrupt)'.format(task.id))
+                print()
+                print('Execution will resume in 5 seconds.')
+                print('To stop the worker, press crtl-c again before the countdown.')
+                print()
+                for i in range(5, 0, -1):
+                    print('{}...'.format(i))
+                    time.sleep(1)
+                print()
+            except KeyboardInterrupt as e:
+                print()
+                print('Now leaving worker...')
+                print()
+                raise SystemExit()
+            finally:
+                new_status = mahler.core.status.Suspended('Suspended by user (KeyboardInterrupt)')
+                assert task.status.name == 'Running'
+                registrar.update_status(task, new_status)
+                print('Execution of task {} interrupted'.format(task.id))
+                print('New status: {}'.format(new_status))
+
+            print()
+            print('Now resuming worker...')
+            print()
+
+            continue
+
         except mahler.core.utils.errors.SignalSuspend as e:
             print('Execution of task {} suspended'.format(task.id))
             print('New status: {}'.format(task.status))
