@@ -3,12 +3,14 @@ import contextlib
 import datetime
 import io
 import logging
-import multiprocessing as mp
+import multiprocessing
+import multiprocessing.managers
 import os
 import queue
 import random
 import time
 import traceback
+import signal
 import sys
 import weakref
 
@@ -27,7 +29,7 @@ logger = logging.getLogger('mahler.core.worker')
 STOPPING_TEMPLATE = '---\nStopping execution: {}\n---\n'
 STARTING_TEMPLATE = '---\nStarting execution: {}\n---\n'
 
-def sigterm_handler():
+def sigterm_handler(signal, frame):
     if sigterm_handler.triggered:
         return
     else:
@@ -37,6 +39,13 @@ def sigterm_handler():
 
 
 sigterm_handler.triggered = False
+
+
+# From https://stackoverflow.com/questions/21104997/keyboard-interrupt-with-pythons-multiprocessing
+# initilizer for SyncManager
+def mgr_init():
+    signal.signal(signal.SIGINT, signal.SIG_IGN)
+    signal.signal(signal.SIGTERM, signal.SIG_IGN)
 
 
 @contextlib.contextmanager
@@ -180,63 +189,82 @@ def run(registrar, task, state, stdout, stderr):
     heartbeat = HeartBeatProcess(task.id)
     heartbeat.start()
 
-    with mp.Manager() as manager:
+    manager = multiprocessing.managers.SyncManager()
+    manager.start(mgr_init)
 
-        stdout_queue = manager.Queue()
-        stderr_queue = manager.Queue()
+    stdout_queue = manager.Queue()
+    stderr_queue = manager.Queue()
 
-        stdout = StdQueue(stdout_queue, sys.stdout, mute=not logger.isEnabledFor(logging.INFO),
-                          buffer_size=5)
-        stderr = StdQueue(stderr_queue, sys.stderr, mute=not logger.isEnabledFor(logging.INFO),
-                          buffer_size=5)
+    stdout = StdQueue(stdout_queue, sys.stdout, mute=not logger.isEnabledFor(logging.INFO),
+                      buffer_size=50)
+    stderr = StdQueue(stderr_queue, sys.stderr, mute=not logger.isEnabledFor(logging.INFO),
+                      buffer_size=50)
 
-        data = manager.dict()
-        volume = manager.dict()
+    data = manager.dict()
+    volume = manager.dict()
 
+    try:
+        task_thread = TaskProcess(task.id, state, stdout, stderr, data, volume)
+        task_thread.start()
+
+        while heartbeat.is_alive() and task_thread.is_alive():
+            if not stdout_queue.empty():
+                try:
+                    registrar.update_stdout(task, stdout_queue.get(timeout=0.1))
+                except queue.Empty as e:
+                    pass
+
+            if not stderr_queue.empty():
+                try:
+                    registrar.update_stderr(task, stderr_queue.get(timeout=0.1))
+                except queue.Empty as e:
+                    pass
+
+        # If heartbeat fails, it probably means the status was changed remotely. We 
+        # terminate the task and ignore any possible errors that occured concurrently, the
+        # remote status change is what we keep.
+        if not heartbeat.is_alive():
+            task_thread.terminate()
+
+            # Will raise the error
+            heartbeat.join()
+
+        if not task_thread.is_alive():
+            heartbeat.terminate()
+
+            # Will raise the error
+            task_thread.join()
+
+        data = dict()
+        data.update(task_thread.data)
+
+        volume = dict()
+        volume.update(task_thread.volume)
+    finally:
+        stdout.flush()
+        remaining_stdout = ""
         try:
-            task_thread = TaskProcess(task.id, state, stdout, stderr, data, volume)
-            task_thread.start()
-
-            while heartbeat.is_alive() and task_thread.is_alive():
-                while not stdout_queue.empty():
-                    try:
-                        registrar.update_stdout(task, stdout_queue.get(timeout=1))
-                    except queue.Empty as e:
-                        pass
-
-                    try:
-                        registrar.update_stderr(task, stderr_queue.get(timeout=1))
-                    except queue.Empty as e:
-                        pass
-
-            # If heartbeat fails, it probably means the status was changed remotely. We 
-            # terminate the task and ignore any possible errors that occured concurrently, the
-            # remote status change is what we keep.
-            if not heartbeat.is_alive():
-                task_thread.terminate()
-
-                # Will raise the error
-                heartbeat.join()
-
-            if not task_thread.is_alive():
-                heartbeat.terminate()
-
-                # Will raise the error
-                task_thread.join()
-
-            data = dict()
-            data.update(task_thread.data)
-
-            volume = dict()
-            volume.update(task_thread.volume)
-        finally:
-            stdout.flush()
             while not stdout_queue.empty():
-                registrar.update_stdout(task, stdout_queue.get(timeout=1))
+                # TODO: Why do we get TypeError: Can't convert 'bool' object to str implicitly
+                #       on KeyboardInterrupt?
+                remaining_stdout += stdout_queue.get(timeout=0.01)
+        except (queue.Empty, BaseException) as e:
+            pass
 
-            stderr.flush()
+        if remaining_stdout:
+            task._stdout.refresh()
+            registrar.update_stdout(task, remaining_stdout)
+
+        stderr.flush()
+        remaining_stderr = ""
+        try:
             while not stderr_queue.empty():
-                registrar.update_stderr(task, stderr_queue.get(timeout=1))
+                remaining_stderr += stderr_queue.get(timeout=0.01)
+        except (queue.Empty, BaseException) as e:
+            pass
+        if remaining_stderr:
+            task._stderr.refresh()
+            registrar.update_stderr(task, remaining_stderr)
 
     return data, volume
 
@@ -273,10 +301,11 @@ def execute(registrar, state, task):
 
     except KeyboardInterrupt as e:
         status = mahler.core.status.Suspended('Suspended by user (KeyboardInterrupt)')
+        raise
 
     except BaseException as e:
         # broken
-        message = "execution error: {}".format(e)
+        message = "execution error:{}: {}".format(type(e), e)
         logger.info(message)
         registrar.update_stderr(task, traceback.format_exc() + "\n")
         # status = mahler.core.status.FailedOver(str(e))
@@ -295,7 +324,7 @@ def execute(registrar, state, task):
     return status
 
 
-class Maintainer(mp.Process):
+class Maintainer(multiprocessing.Process):
     def __init__(self, tags, container, sleep_time, **kwargs):
         super(Maintainer, self).__init__(**kwargs)
         self.tags = tags
