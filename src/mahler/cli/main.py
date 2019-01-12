@@ -27,8 +27,6 @@ def load_modules_parser(main_parser):
     }
 
     for command_name, command_factory in plugins.items():
-        if command_name == "dashboard":
-            continue
         command_factory.load()(subparsers)
 
 

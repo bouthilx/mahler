@@ -10,10 +10,9 @@
 TODO
 """
 import logging
+import pkg_resources
 
 import mahler.core.worker
-
-from .monitor import app
 
 
 log = logging.getLogger(__name__)
@@ -23,7 +22,6 @@ def build(parser):
     """Return the parser that needs to be used for this command"""
     dashboard_parser = parser.add_parser('dashboard', help='dashboard help')
 
-    dashboard_parser.set_defaults(func=main)
 
     load_modules_parser(dashboard_parser)
 
