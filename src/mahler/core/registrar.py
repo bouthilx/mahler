@@ -22,6 +22,9 @@ import mahler.core.status
 logger = logging.getLogger('mahler.core.registrar')
 
 
+MIN_TIME_WAITING = 5
+
+
 class RegistrarDB(object):
     def __init__(self):
         pass
@@ -111,11 +114,10 @@ class Registrar(object):
         for task_document in self.retrieve_tasks(_return_doc=True, _projection=projection):
             # First make sure the task was registered long enough that it is worth looking for a
             # report
-            heartbeat_frequency = task_document['registry']['heartbeat']
             created_on = task_document['id'].generation_time
             now = datetime.datetime.now(datetime.timezone.utc)
             time_since_creation = (now - created_on).total_seconds()
-            if time_since_creation < 2 * heartbeat_frequency:
+            if time_since_creation < MIN_TIME_WAITING:
                 continue
 
             # Looking for a report
@@ -145,10 +147,19 @@ class Registrar(object):
                           mahler.core.status.Broken('')]
 
         def is_outdated(task, task_document):
+            # First make sure the report was updated long enough that it is worth looking
+            # at the attributes
+            updated_on = task_document['registry']['reported_on'].generation_time
+            now = datetime.datetime.now(datetime.timezone.utc)
+            time_since_update = (now - updated_on).total_seconds()
+            if time_since_update < MIN_TIME_WAITING:
+                return False
+
             return ((task.status.name != task_document['registry']['status']) or
                     (set(task.tags) != set(task_document['registry']['tags'])))
 
-        projection = {'registry.status': 1, 'registry.tags': 1}
+        projection = {'registry.status': 1, 'registry.tags': 1,
+                      'registry.reported_on': 1}
 
         for status_family in [volatile_status, queueable_status, mutable_status]:
 
@@ -178,7 +189,7 @@ class Registrar(object):
 
         status_names = [status.name for status in queueable_status]
 
-        projection = {'registry.status': 1}
+        projection = {'registry.status': 1, 'registry.reported_on': 1}
 
         task_iterator = self.retrieve_tasks(
             tags=tags, container=container, status=queueable_status, limit=limit,
@@ -189,8 +200,16 @@ class Registrar(object):
             task = Task(op=None, arguments=None, id=task_document['id'],
                         name=None, registrar=self)
 
+            # First make sure the task was updated since long enough that it is worth trying
+            # to update it now.
+            updated_on = task_document['registry']['reported_on'].generation_time
+            now = datetime.datetime.now(datetime.timezone.utc)
+            time_since_update = (now - updated_on).total_seconds()
+            if time_since_update < MIN_TIME_WAITING:
+                continue
+
             if task.status.name not in status_names:
-                self.update_report(task.to_dict())
+                # Report is outdated, leave it to maintain_report to update it.
                 continue
 
             try:
@@ -213,7 +232,7 @@ class Registrar(object):
         updated = 0
 
         # TODO: Implement dependencies and test
-        projection = {'registry.status': 1}  # , 'bounds.dependencies': 1}
+        projection = {'registry.status': 1}
 
         task_iterator = self.retrieve_tasks(
             tags=tags, container=container, status=onhold_status, limit=limit,
@@ -223,7 +242,7 @@ class Registrar(object):
             task = Task(op=None, arguments=None, id=task_document['id'],
                         name=None, registrar=self)
             if task.status.name != onhold_status.name:
-                self.update_report(task.to_dict())
+                # Report is outdated, leave it to maintain_report to update it.
                 continue
 
             # TODO: Implement dependencies and test
@@ -257,7 +276,7 @@ class Registrar(object):
             task = Task(op=None, arguments=None, id=task_document['id'],
                         name=None, registrar=self)
             if task.status.name not in status_names:
-                self.update_report(task.to_dict())
+                # Report is outdated, leave it to maintain_report to update it.
                 continue
 
             heartbeat_frequency = task_document['registry']['heartbeat']

@@ -185,8 +185,6 @@ class HeartBeatProcess(mahler.core.utils.errors.ProcessExceptionHandler):
                         'Task cancelled remotely: {}'.format(new_status.message))
                 else:
                     raise
-            finally:
-                registrar.update_report(task.to_dict())
 
 
 def run(registrar, task, state, stdout, stderr):
@@ -383,7 +381,7 @@ class OnHoldMaintainer(Maintainer):
 
 
 def main(tags=tuple(), container=None, working_dir=None, max_tasks=10e10, depletion_patience=10,
-         exhaust_wait_time=20, max_failedover_attempts=5, **kwargs):
+         exhaust_wait_time=20, max_failedover_attempts=3, **kwargs):
 
     for maintainer in [UnreportedMaintainer, ReportMaintainer, LostTaskMaintainer,
                        ToQueuedMaintainer, OnHoldMaintainer]:
@@ -395,8 +393,8 @@ def main(tags=tuple(), container=None, working_dir=None, max_tasks=10e10, deplet
               max_failedover_attempts=max_failedover_attempts)
 
 
-def _main(tags=tuple(), container=None, max_tasks=10e10, depletion_patience=12,
-          exhaust_wait_time=10, max_failedover_attempts=5):
+def _main(tags=tuple(), container=None, max_tasks=10e10, depletion_patience=10,
+          exhaust_wait_time=20, max_failedover_attempts=3):
     # TODO: Support config
     registrar = mahler.core.registrar.build(name='mongodb')
     dispatcher = Dispatcher(registrar)

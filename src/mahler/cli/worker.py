@@ -33,8 +33,8 @@ def build(parser):
         help='Maximum number of tasks to execute. Default: practicaly inf (10e10)')
 
     execute_parser.add_argument(
-        '--max-failedover-attempts', default=5, type=int,
-        help=('Number of times to try again the execution of a broken task. Default: 5'))
+        '--max-failedover-attempts', default=3, type=int,
+        help=('Number of times to try again the execution of a broken task. Default: 3'))
 
     execute_parser.add_argument(
         '--max-maintain', default=10, type=int,
@@ -43,13 +43,13 @@ def build(parser):
               'the throughput when there is many workers. Default: 10'))
 
     execute_parser.add_argument(
-        '--depletion-patience', default=12, type=int,
+        '--depletion-patience', default=10, type=int,
         help=('When there is no task available, number of times to try again maintenance of the '
-              'tasks before giving up and terminating the worker. Default is 12'))
+              'tasks before giving up and terminating the worker. Default: 10'))
 
     execute_parser.add_argument(
-        '--exhaust-wait-time', default=10, type=float,
-        help=('Number of seconds to wait between two maintenance attempts. Default: 10'))
+        '--exhaust-wait-time', default=20, type=float,
+        help=('Number of seconds to wait between two maintenance attempts. Default: 20'))
 
     execute_parser.set_defaults(func=main)
 
