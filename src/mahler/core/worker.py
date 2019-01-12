@@ -348,7 +348,7 @@ class Maintainer(multiprocessing.Process):
             if updated:
                 self.logger.info("{} task updated".format(updated))
             else:
-                sleep_time = random.random() * self.sleep_time
+                sleep_time = random.gauss(self.sleep_time, self.sleep_time / 10.)
                 self.logger.info(
                     'No more task to maintain. Waiting {}s before trying again.'.format(sleep_time))
                 time.sleep(sleep_time)
@@ -382,8 +382,8 @@ class OnHoldMaintainer(Maintainer):
         return registrar.maintain_onhold(tags=self.tags, container=self.container, limit=None)
 
 
-def main(tags=tuple(), container=None, working_dir=None, max_tasks=10e10, depletion_patience=12,
-         exhaust_wait_time=10, max_failedover_attempts=5, **kwargs):
+def main(tags=tuple(), container=None, working_dir=None, max_tasks=10e10, depletion_patience=10,
+         exhaust_wait_time=20, max_failedover_attempts=5, **kwargs):
 
     for maintainer in [UnreportedMaintainer, ReportMaintainer, LostTaskMaintainer,
                        ToQueuedMaintainer, OnHoldMaintainer]:
