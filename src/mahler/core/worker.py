@@ -70,7 +70,11 @@ class StdQueue():
     def write(self, text):
         n_chars = 0
         if '\n' in text:
-            for line in text.split("\n"):
+            lines = text.split("\n")
+            if not lines[-1]:
+                lines = lines[:-1]
+            for line in lines:
+                # Last part may not be a line
                 n_chars += self.writeline(line)
         else:
             self.lines.append(text)
@@ -93,8 +97,9 @@ class StdQueue():
         return len(line) + 1
 
     def flush(self):
-        self.queue.put(''.join(self.lines))
-        self.lines = []
+        if self.lines:
+            self.queue.put(''.join(self.lines))
+            self.lines = []
 
     def close(self):
         self.flush()
