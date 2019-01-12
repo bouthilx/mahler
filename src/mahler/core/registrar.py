@@ -98,6 +98,8 @@ class Registrar(object):
         updated += self.maintain_to_queue(tags, container, limit=limit - updated)
         updated += self.maintain_onhold(tags, container, limit=limit - updated)
 
+        # TODO: Maintain reports for mismatch on output and volume?
+
         return updated
 
     def maintain_unreported(self, limit=100):
@@ -295,11 +297,11 @@ class Registrar(object):
             self.update_status(task, mahler.core.status.OnHold(message))
             self.add_tags(task, [task.name])
             try:
-                self.update_report(task.to_dict(report=False), upsert=True)
+                self.update_report(task.to_dict(report=True), upsert=True)
             except RaceCondition:
                 pass
 
-    def update_report(self, task_report, upsert=False):
+    def update_report(self, task_report, update_output=False, upsert=False):
         # create event
         # update report
         event = self.create_event('snapshot', task_report['id'], task_report.pop('timestamp'))
@@ -308,7 +310,7 @@ class Registrar(object):
         # NOTE: There should be no RaceCondition, snapshot events have no unique key
         self._db.add_event('report.timestamp', event)
         task_report['registry']['reported_on'] = event['id']
-        self._db.update_report(task_report, upsert)
+        self._db.update_report(task_report, update_output=update_output, upsert=upsert)
 
     def retrieve_tasks(self, id=None, tags=tuple(), container=None, status=None, limit=None,
                        use_report=True, _return_doc=False, _projection=None):
@@ -432,12 +434,18 @@ class Registrar(object):
         # TODO: Check status as well as process ID
         # assert mahler.core.status.is_running(task, local=True)
         # TODO: Implement...
+        if task.output is not None:
+            raise RuntimeError('Cannot set output of task {} twice'.format(task.id))
         self._db.set_output(task, output)
+        self.update_report(task.to_dict(), update_output=True)
 
     def set_volume(self, task, volume):
         # TODO: Check status as well as process ID
         # assert mahler.core.status.is_running(task, local=True)
+        if task.volume is not None:
+            raise RuntimeError('Cannot set volume of task {} twice'.format(task.id))
         self._db.set_volume(task, volume)
+        self.update_report(task.to_dict())
 
     def retrieve_output(self, task):
         return self._db.retrieve_output(task)
