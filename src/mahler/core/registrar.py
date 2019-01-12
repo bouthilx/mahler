@@ -112,7 +112,7 @@ class Registrar(object):
             heartbeat_frequency = task_document['registry']['heartbeat']
             created_on = task_document['id'].generation_time
             now = datetime.datetime.now(datetime.timezone.utc)
-            time_since_creation = (now - last_heartbeat).total_seconds()
+            time_since_creation = (now - created_on).total_seconds()
             if time_since_creation < 2 * heartbeat_frequency:
                 continue
 
