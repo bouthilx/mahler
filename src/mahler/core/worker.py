@@ -413,7 +413,7 @@ def _main(tags=tuple(), container=None, max_tasks=10e10, depletion_patience=10,
 
             # NOTE: Dispatcher should turn the task-document into an engine task,
             #       loading the volume at the same time
-            task = dispatcher.pick(tags, container, state)  # tasks, registrar)
+            task = dispatcher.pick(registrar, tags, container, state)  # tasks, registrar)
             exhaust_failures = 0
         except RuntimeError:
             logger.info('Dispatcher could not pick any task for execution.')
@@ -648,17 +648,16 @@ class Dispatcher(object):
     __refs__ = weakref.WeakSet()
 
     def __init__(self, registrar):
-        self.registrar = registrar
         self._picked_task = None
 
-        self.__refs__.add(self)
+        Dispatcher.__refs__.add(self)
 
     @property
     def picked_task(self):
         return self._picked_task
 
-    def pick(self, tags, container, state):
-        tasks = self.registrar.retrieve_tasks(
+    def pick(self, registrar, tags, container, state):
+        tasks = registrar.retrieve_tasks(
             tags=tags, container=container,
             status=mahler.core.status.Queued(''),
             limit=100)
@@ -671,7 +670,7 @@ class Dispatcher(object):
                 continue
 
             try:
-                self.registrar.reserve(task)
+                registrar.reserve(task)
                 self._picked_task = task
                 return task
             except (ValueError, mahler.core.registrar.RaceCondition) as e:
