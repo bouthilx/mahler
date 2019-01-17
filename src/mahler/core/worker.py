@@ -299,7 +299,7 @@ def execute(registrar, state, task):
         raise
 
     except mahler.core.utils.errors.SignalInterrupt as e:
-        status = mahler.core.status.Interrupted('Interrupted by system (SIGTERM)')
+        status = mahler.core.status.Interrupted(str(e))
         raise
 
     except KeyboardInterrupt as e:
