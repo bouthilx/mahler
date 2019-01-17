@@ -57,7 +57,9 @@ class Client(object):
                                              _return_doc=_return_doc, _projection=_projection)
 
     def add_tags(self, task, tags, message=''):
-        return self.registrar.add_tags(task, tags, message)
+        rval = self.registrar.add_tags(task, tags, message)
+        self.registrar.update_report(task.to_dict())
+        return rval
 
     def remove_tags(self, task, tags):
         return
