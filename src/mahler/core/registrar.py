@@ -22,6 +22,13 @@ import mahler.core.status
 logger = logging.getLogger('mahler.core.registrar')
 
 
+TMP_BROKEN = [
+    "GPU not available",
+    "SSL handshake failed",
+    "[Errno 111] Connection refused"
+]
+
+
 MIN_TIME_WAITING = 5
 
 
@@ -217,6 +224,41 @@ class Registrar(object):
                     task,
                     mahler.core.status.Queued(
                         're-queue {} task'.format(task_document['registry']['status'])))
+                self.update_report(task.to_dict())
+            except (ValueError, RaceCondition) as e:
+                logger.debug('Task {} status changed concurrently'.format(task.id))
+                continue
+
+            updated += 1
+
+        return updated
+
+    def maintain_broken(self, tags, container=None, limit=100):
+        onhold_status = mahler.core.status.Broken('')
+
+        updated = 0
+
+        # TODO: Implement dependencies and test
+        projection = {'registry.status': 1}
+
+        task_iterator = self.retrieve_tasks(
+            tags=tags, container=container, status=onhold_status, limit=limit,
+            _return_doc=True, _projection=projection)
+
+        for task_document in task_iterator:
+            task = Task(op=None, arguments=None, id=task_document['id'],
+                        name=None, registrar=self)
+            if task.status.name != onhold_status.name:
+                # Report is outdated, leave it to maintain_report to update it.
+                continue
+
+            if all(message_snipet not in task.status.message for message_snipet in TMP_BROKEN):
+                continue
+
+            # TODO: Implement dependencies and test
+            # task._dependencies = task_document['bounds.dependencies']
+            try:
+                self.update_status(task, mahler.core.status.FailedOver('Crashed because of broken node'))
                 self.update_report(task.to_dict())
             except (ValueError, RaceCondition) as e:
                 logger.debug('Task {} status changed concurrently'.format(task.id))

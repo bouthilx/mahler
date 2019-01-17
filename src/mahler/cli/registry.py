@@ -15,6 +15,7 @@ import mahler.core.registrar
 import mahler.core.resources
 import mahler.core.status
 import mahler.core.worker
+import mahler.core.maintainer
 
 
 # TODO: 
@@ -50,6 +51,30 @@ def load_modules_parser(main_parser):
 
     load_modules_init_parser(subparsers, plugins)
 
+    add_maintainer_parser(subparsers)
+
+
+def add_maintainer_parser(subparsers):
+    maintainer_parser = subparsers.add_parser('maintain', help='maintainer help')
+
+    maintainer_parser.add_argument(
+        '--types', nargs='*', choices=mahler.core.maintainer.TYPES, type=str,
+        help='Types of maintenance to execute.')
+
+    maintainer_parser.add_argument(
+        '--tags', nargs='*', type=str,
+        help='Tags to select for maintenance')
+
+    maintainer_parser.add_argument(
+        '--container', type=str,
+        help='Container to select for maintenance')
+
+    maintainer_parser.add_argument(
+        '--sleep', type=int, default=20,
+        help='Time to sleep if no tasks found to update. Default: 20')
+
+    maintainer_parser.set_defaults(subfunc=maintain)
+    
 
 def load_modules_init_parser(subparsers, plugins):
     init_parser = subparsers.add_parser('init', help='mongodb_init help')
@@ -62,4 +87,8 @@ def load_modules_init_parser(subparsers, plugins):
 def main(args):
     # TODO Support setting name
     registrar = mahler.core.registrar.build(name='mongodb')
-    args['subfunc'](registrar, **args)
+    args.pop('subfunc')(registrar, **args)
+
+
+def maintain(registrar, **kwargs):
+    mahler.core.maintainer.maintain(registrar, **kwargs)

@@ -327,62 +327,8 @@ def execute(registrar, state, task):
     return status
 
 
-class Maintainer(multiprocessing.Process):
-    def __init__(self, tags, container, sleep_time, **kwargs):
-        super(Maintainer, self).__init__(**kwargs)
-        self.tags = tags
-        self.container = container
-        self.sleep_time = sleep_time
-        self.logger = logging.getLogger('mahler.daemon.' + self.__class__.__name__)
-        stream_handler = logging.StreamHandler(sys.stdout)
-        stream_handler.setFormatter(logging.getLogger().handlers[0].formatter)
-        self.logger.addHandler(stream_handler)
-
-    def run(self):
-        registrar = mahler.core.registrar.build(name='mongodb')
-
-        while True:
-            updated = self.maintain(registrar)
-            if updated:
-                self.logger.info("{} task updated".format(updated))
-            else:
-                sleep_time = random.gauss(self.sleep_time, self.sleep_time / 10.)
-                self.logger.info(
-                    'No more task to maintain. Waiting {}s before trying again.'.format(sleep_time))
-                time.sleep(sleep_time)
-
-    def maintain(self, registrar):
-        pass
-
-
-class UnreportedMaintainer(Maintainer):
-    def maintain(self, registrar):
-        return registrar.maintain_unreported(limit=None)
-
-
-class ReportMaintainer(Maintainer):
-    def maintain(self, registrar):
-        return registrar.maintain_reports(tags=self.tags, container=self.container, limit=None)
-
-
-class LostTaskMaintainer(Maintainer):
-    def maintain(self, registrar):
-        return registrar.maintain_lost(tags=self.tags, container=self.container, limit=None)
-
-
-class ToQueuedMaintainer(Maintainer):
-    def maintain(self, registrar):
-        return registrar.maintain_to_queue(tags=self.tags, container=self.container, limit=None)
-
-
-class OnHoldMaintainer(Maintainer):
-    def maintain(self, registrar):
-        return registrar.maintain_onhold(tags=self.tags, container=self.container, limit=None)
-
-
 def main(tags=tuple(), container=None, working_dir=None, max_tasks=10e10, depletion_patience=10,
          exhaust_wait_time=20, max_failedover_attempts=3, **kwargs):
-
 
     with tmp_directory(working_dir):
         _main(tags=tags, container=container, max_tasks=max_tasks,
