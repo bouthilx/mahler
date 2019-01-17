@@ -671,7 +671,7 @@ class Dispatcher(object):
 
             try:
                 registrar.reserve(task)
-                self._picked_task = task
+                self._picked_task = str(task.id)
                 return task
             except (ValueError, mahler.core.registrar.RaceCondition) as e:
                 logger.info('Task {} reserved by concurrent worker'.format(task.id))

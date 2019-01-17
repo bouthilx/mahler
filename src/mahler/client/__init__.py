@@ -42,11 +42,14 @@ class Client(object):
         if not Dispatcher.__refs__:
             return None
 
-        return next(iter(Dispatcher.__refs__)).picked_task
-        # if not os.environ['_MAHLER_TASK_ID']:
-        #     return None
+        task_id = next(iter(Dispatcher.__refs__)).picked_task
+        if task_id is None:
+            return None
 
-        # return self.find(id=os.environ['_MAHLER_TASK_ID'])
+        try:
+            return next(iter(self.find(id=task_id)))
+        except StopIteration:
+            return None
 
     def find(self, id=None, tags=tuple(), container=None, status=None, _return_doc=False,
              _projection=None):
