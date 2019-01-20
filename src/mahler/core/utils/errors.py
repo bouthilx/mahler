@@ -11,7 +11,11 @@ class SignalCancel(Exception):
     pass
 
 
-class SignalInterrupt(Exception):
+class SignalInterruptTask(Exception):
+    pass
+
+
+class SignalInterruptWorker(Exception):
     pass
 
 

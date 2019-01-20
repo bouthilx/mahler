@@ -35,7 +35,7 @@ def sigterm_handler(signal, frame):
     else:
         sigterm_handler.triggered = True
 
-    raise mahler.core.utils.errors.SignalInterrupt("Task killed by SIGTERM")
+    raise mahler.core.utils.errors.SignalInterruptWorker("Task killed by SIGTERM")
 
 
 sigterm_handler.triggered = False
@@ -299,7 +299,11 @@ def execute(registrar, state, task):
         status = mahler.core.status.Cancelled('Cancelled by user')
         raise
 
-    except mahler.core.utils.errors.SignalInterrupt as e:
+    except mahler.core.utils.errors.SignalInterruptWorker as e:
+        status = mahler.core.status.Interrupted(str(e))
+        raise
+
+    except mahler.core.utils.errors.SignalInterruptTask as e:
         status = mahler.core.status.Interrupted(str(e))
         raise
 
@@ -449,13 +453,23 @@ def _main(tags=tuple(), container=None, max_tasks=10e10, depletion_patience=10,
             print('New status: {}'.format(task.status))
             continue
 
-        except mahler.core.utils.errors.SignalInterrupt as e:
-            new_status = mahler.core.status.Interrupted('Interrupted by system (SIGTERM)')
+        except mahler.core.utils.errors.SignalInterruptWorker as e:
+            new_status = mahler.core.status.Interrupted(str(e))
             assert task.status.name == 'Running'
             registrar.update_status(task, new_status)
             print('Execution of task {} interrupted'.format(task.id))
             print('New status: {}'.format(new_status))
+            print('Now interrupting worker...')
             raise
+
+        except mahler.core.utils.errors.SignalInterruptTask as e:
+            new_status = mahler.core.status.Interrupted(str(e))
+            assert task.status.name == 'Running'
+            registrar.update_status(task, new_status)
+            print('Execution of task {} interrupted'.format(task.id))
+            print('New status: {}'.format(new_status))
+            print('Attempting to resuming work with another task...')
+            continue
 
         except mahler.core.utils.errors.ExecutionError as e:
 
