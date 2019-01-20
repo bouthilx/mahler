@@ -231,11 +231,12 @@ def run(registrar, task, state, stdout, stderr):
 
             # Will raise the error
             heartbeat.join()
+            raise RuntimeError("Heartbeat should have raised an error related to status change.")
 
         if not task_thread.is_alive():
             heartbeat.terminate()
 
-            # Will raise the error
+            # Will raise the error if any
             task_thread.join()
 
         data = dict()
