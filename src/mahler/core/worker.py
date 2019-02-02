@@ -139,60 +139,38 @@ class TaskProcess(mahler.core.utils.errors.ProcessExceptionHandler):
             self.volume.update(volume)
 
 
-class HeartBeatProcess(mahler.core.utils.errors.ProcessExceptionHandler):
-    def __init__(self, task_id, **kwargs):
-        self.task_id = task_id
-        self.logger = logging.getLogger(__name__ + ".heartbeat")
-        stream_handler = logging.StreamHandler(sys.stdout)
-        stream_handler.setFormatter(logging.getLogger().handlers[0].formatter)
-        self.logger.addHandler(stream_handler)
-        super(HeartBeatProcess, self).__init__(**kwargs)
+def heartbeat(registrar, task, slept):
+    # TODO: Replace this with observers on database
+    #       ex: tailable cursors in MongoDB
+    #       https://docs.mongodb.com/manual/core/tailable-cursors/
+    new_status = task.status
+    if new_status.name == 'Suspended':
+        raise mahler.core.utils.errors.SignalSuspend(
+                'Task suspended remotely: {}'.format(new_status.message))
+    elif task.status.name == 'Cancelled':
+        raise mahler.core.utils.errors.SignalCancel(
+                'Task cancelled remotely: {}'.format(new_status.message))
 
-    def try_catch_run(self):
-        registrar = mahler.core.registrar.build(name='mongodb')
-        task = next(iter(registrar.retrieve_tasks(id=self.task_id)))
-        task._status.refresh()
+    if slept < task.heartbeat:
+        return False
 
-        heartbeat_status = mahler.core.status.Running('heartbeat')
+    try:
+        registrar.update_status(task, mahler.core.status.Running('heartbeat'))
+    except mahler.core.utils.errors.RaceCondition as e:
+        new_status = task.status
+        if isinstance(new_status, mahler.core.status.Suspended):
+            raise mahler.core.utils.errors.SignalSuspend(
+                'Task suspended remotely: {}'.format(new_status.message))
+        elif isinstance(new_status, mahler.core.status.Cancelled):
+            raise mahler.core.utils.errors.SignalCancel(
+                'Task cancelled remotely: {}'.format(new_status.message))
+        else:
+            raise
 
-        # while not self.stop.is_set():
-        while True:
-            slept = 0
-            try:
-                while True:
-                    time_to_sleep = min(task.heartbeat - slept, 5)
-                    time.sleep(time_to_sleep)
-                    slept += time_to_sleep
-                    
-                    if slept >= task.heartbeat:
-                        break
-
-                    # TODO: Replace this with observers on database
-                    #       ex: tailable cursors in MongoDB
-                    #       https://docs.mongodb.com/manual/core/tailable-cursors/
-                    new_status = task.status
-                    if new_status.name == 'Suspended':
-                        raise mahler.core.utils.errors.RaceCondition('Suspended remotely')
-                    elif task.status.name == 'Cancelled':
-                        raise mahler.core.utils.errors.RaceCondition('Cancelled remotely')
-
-                registrar.update_status(task, heartbeat_status)
-            except mahler.core.utils.errors.RaceCondition as e:
-                new_status = task.status
-                if isinstance(new_status, mahler.core.status.Suspended):
-                    raise mahler.core.utils.errors.SignalSuspend(
-                        'Task suspended remotely: {}'.format(new_status.message))
-                elif isinstance(new_status, mahler.core.status.Cancelled):
-                    raise mahler.core.utils.errors.SignalCancel(
-                        'Task cancelled remotely: {}'.format(new_status.message))
-                else:
-                    raise
+    return True
 
 
 def run(registrar, task, state, stdout, stderr):
-
-    heartbeat = HeartBeatProcess(task.id)
-    heartbeat.start()
 
     manager = multiprocessing.managers.SyncManager()
     manager.start(mgr_init)
@@ -201,9 +179,9 @@ def run(registrar, task, state, stdout, stderr):
     stderr_queue = manager.Queue()
 
     stdout = StdQueue(stdout_queue, sys.stdout, mute=not logger.isEnabledFor(logging.INFO),
-                      buffer_size=50)
+                      buffer_size=1)
     stderr = StdQueue(stderr_queue, sys.stderr, mute=not logger.isEnabledFor(logging.INFO),
-                      buffer_size=50)
+                      buffer_size=1)
 
     data = manager.dict()
     volume = manager.dict()
@@ -212,42 +190,36 @@ def run(registrar, task, state, stdout, stderr):
         task_thread = TaskProcess(task.get_offline(), state, stdout, stderr, data, volume)
         task_thread.start()
 
-        while heartbeat.is_alive() and task_thread.is_alive():
+        start = time.time()
+        while task_thread.is_alive():
+
             if not stdout_queue.empty():
                 try:
-                    registrar.update_stdout(task, stdout_queue.get(timeout=0.1))
+                    registrar.update_stdout(task, stdout_queue.get(timeout=5))
                 except queue.Empty as e:
                     pass
 
             if not stderr_queue.empty():
                 try:
-                    registrar.update_stderr(task, stderr_queue.get(timeout=0.1))
+                    registrar.update_stderr(task, stderr_queue.get(timeout=5))
                 except queue.Empty as e:
                     pass
 
-        # If heartbeat fails, it probably means the status was changed remotely. We 
-        # terminate the task and ignore any possible errors that occured concurrently, the
-        # remote status change is what we keep.
-        if not heartbeat.is_alive():
-            task_thread.terminate()
+            if heartbeat(registrar, task, slept=time.time() - start):
+                start = time.time()
 
-            # Will raise the error
-            heartbeat.join()
-            raise RuntimeError("Heartbeat should have raised an error related to status change.")
-
-        if not task_thread.is_alive():
-            heartbeat.terminate()
-
-            # Will raise the error if any
-            task_thread.join()
+        # Will raise the error if any
+        task_thread.join()
 
         data = dict()
         data.update(task_thread.data)
 
         volume = dict()
         volume.update(task_thread.volume)
+    except Exception:
+        task_thread.terminate()
+        raise
     finally:
-        stdout.flush()
         remaining_stdout = ""
         try:
             while not stdout_queue.empty():
@@ -261,13 +233,13 @@ def run(registrar, task, state, stdout, stderr):
             task._stdout.refresh()
             registrar.update_stdout(task, remaining_stdout)
 
-        stderr.flush()
         remaining_stderr = ""
         try:
             while not stderr_queue.empty():
                 remaining_stderr += stderr_queue.get(timeout=0.01)
         except (queue.Empty, BaseException) as e:
             pass
+
         if remaining_stderr:
             task._stderr.refresh()
             registrar.update_stderr(task, remaining_stderr)
@@ -323,8 +295,8 @@ def execute(registrar, state, task):
 
     finally:
         utcnow = datetime.datetime.utcnow()
-        registrar.update_stdout(task, STARTING_TEMPLATE.format(utcnow) + "\n")
-        registrar.update_stderr(task, STARTING_TEMPLATE.format(utcnow) + "\n")
+        registrar.update_stdout(task, STOPPING_TEMPLATE.format(utcnow) + "\n")
+        registrar.update_stderr(task, STOPPING_TEMPLATE.format(utcnow) + "\n")
 
     # TODO
     # NOTE: storage.write adds volume links to the registry.
