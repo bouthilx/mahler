@@ -102,3 +102,6 @@ class Client(object):
         rval = self.registrar.update_status(task, new_status)
         self.registrar.update_report(task.to_dict())
         return rval
+
+    def close(self):
+        self.registrar.close()

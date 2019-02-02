@@ -514,6 +514,9 @@ class Registrar(object):
     def retrieve_volume(self, task):
         return self._db.retrieve_volume(task)
 
+    def close(self):
+        self._db.close()
+
 
 def build(**kwargs):
 
