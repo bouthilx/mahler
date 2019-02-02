@@ -1,4 +1,5 @@
 import multiprocessing as mp
+import queue
 import sys
 
 from tblib import pickling_support
@@ -33,7 +34,7 @@ class RaceCondition(Exception):
 
 class ProcessExceptionHandler(mp.Process):
     def __init__(self, **kwargs):
-        self.queue = mp.Queue(5)
+        self.queue = mp.Queue()
         super(ProcessExceptionHandler, self).__init__(**kwargs)
 
     def try_catch_run(self):
@@ -47,6 +48,9 @@ class ProcessExceptionHandler(mp.Process):
 
     def join(self):
         super(ProcessExceptionHandler, self).join()
-        if not self.queue.empty():
-            exc = self.queue.get(block=False)
-            raise exc[1].with_traceback(exc[2])
+        try:
+            exc = self.queue.get(timeout=0.1)
+        except queue.Empty:
+            return
+
+        raise exc[1].with_traceback(exc[2])
