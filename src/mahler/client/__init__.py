@@ -17,6 +17,15 @@ def operator(restore=None, resources=None, immutable=False, resumable=False):
     return call
 
 
+def get_current_task_id():
+    if not Dispatcher.__refs__:
+        return None
+
+    task_id = next(iter(Dispatcher.__refs__)).picked_task
+
+    return task_id
+
+
 class Client(object):
     CURRENT = 'current'
 
@@ -39,10 +48,8 @@ class Client(object):
         return task
 
     def get_current_task(self):
-        if not Dispatcher.__refs__:
-            return None
+        task_id = get_current_task_id()
 
-        task_id = next(iter(Dispatcher.__refs__)).picked_task
         if task_id is None:
             return None
 
