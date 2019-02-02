@@ -118,8 +118,8 @@ class StdQueue():
 
 
 class TaskProcess(mahler.core.utils.errors.ProcessExceptionHandler):
-    def __init__(self, task_id, state, stdout, stderr, data, volume, **kwargs):
-        self.task_id = task_id
+    def __init__(self, offline_task, state, stdout, stderr, data, volume, **kwargs):
+        self.offline_task = offline_task
         self.state = state
         self.stdout = stdout
         self.stderr = stderr
@@ -128,9 +128,11 @@ class TaskProcess(mahler.core.utils.errors.ProcessExceptionHandler):
         super(TaskProcess, self).__init__(**kwargs)
 
     def try_catch_run(self):
-        registrar = mahler.core.registrar.build(name='mongodb')
-        task = next(iter(registrar.retrieve_tasks(id=self.task_id)))
-        data, volume = task.run(self.state, stdout=self.stdout, stderr=self.stderr)
+        try:
+            data, volume = self.offline_task.run(self.state, stdout=self.stdout, stderr=self.stderr)
+        finally:
+            self.stdout.flush()
+            self.stderr.flush()
         if data:
             self.data.update(data)
         if volume:
@@ -207,7 +209,7 @@ def run(registrar, task, state, stdout, stderr):
     volume = manager.dict()
 
     try:
-        task_thread = TaskProcess(task.id, state, stdout, stderr, data, volume)
+        task_thread = TaskProcess(task.get_offline(), state, stdout, stderr, data, volume)
         task_thread.start()
 
         while heartbeat.is_alive() and task_thread.is_alive():

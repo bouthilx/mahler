@@ -103,6 +103,10 @@ class Task(object):
     def register(self, registrar):
         pass
 
+    def get_offline(self):
+        return Task(self.op, self.arguments, id=self.id, name=self.name, registrar=None,
+                    container=self.container, heartbeat=self.heartbeat)
+
     def run(self, state, stdout=sys.stdout, stderr=sys.stderr):
         if not self.is_registered:
             raise RuntimeError("Cannot execute task if not registered")
