@@ -39,7 +39,8 @@ class RegistrarDB(object):
     def register_task(self, task):
         raise NotImplemented()
     
-    def retrieve_tasks(self, id=None, tags=tuple(), container=None, status=None, limit=None):
+    def retrieve_tasks(self, id=None, tags=tuple(), container=None, status=None, limit=None,
+                       sort=None):
         raise NotImplemented()
 
     def add_event(self, event_type, event_object):
@@ -374,10 +375,10 @@ class Registrar(object):
         self._db.update_report(task_report, update_output=update_output, upsert=upsert)
 
     def retrieve_tasks(self, id=None, tags=tuple(), container=None, status=None, limit=None,
-                       use_report=True, _return_doc=False, _projection=None):
+                       sort=None, use_report=True, _return_doc=False, _projection=None):
         """
         """
-        task_iterator = self._db.retrieve_tasks(id, tags, container, status, limit=limit,
+        task_iterator = self._db.retrieve_tasks(id, tags, container, status, limit=limit, sort=sort,
                                                 use_report=use_report, projection=_projection)
         for task_document in task_iterator:
             if _return_doc:
