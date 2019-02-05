@@ -164,9 +164,10 @@ class Registrar(object):
                 return False
 
             return ((task.status.name != task_document['registry']['status']) or
-                    (set(task.tags) != set(task_document['registry']['tags'])))
+                    (set(task.tags) != set(task_document['registry']['tags'])) or
+                    (task_document['output'] != task.output))
 
-        projection = {'registry.status': 1, 'registry.tags': 1,
+        projection = {'registry.status': 1, 'registry.tags': 1, 'output': 1,
                       'registry.reported_on': 1}
 
         for status_family in [volatile_status, queueable_status, mutable_status]:
@@ -184,7 +185,7 @@ class Registrar(object):
                             name=None, registrar=self)
 
                 if is_outdated(task, task_document):
-                    self.update_report(task.to_dict())
+                    self.update_report(task.to_dict(), update_output=True)
                     updated += 1
 
         return updated
@@ -221,10 +222,16 @@ class Registrar(object):
                 continue
 
             try:
-                self.update_status(
-                    task,
-                    mahler.core.status.Queued(
-                        're-queue {} task'.format(task_document['registry']['status'])))
+                if task.output:
+                    self.update_status(
+                        task,
+                        mahler.core.status.Completed('Task was completed and have output.'),
+                        _force=True)
+                else:
+                    self.update_status(
+                        task,
+                        mahler.core.status.Queued(
+                            're-queue {} task'.format(task_document['registry']['status'])))
                 self.update_report(task.to_dict())
             except (ValueError, RaceCondition) as e:
                 logger.debug('Task {} status changed concurrently'.format(task.id))
@@ -253,13 +260,17 @@ class Registrar(object):
                 # Report is outdated, leave it to maintain_report to update it.
                 continue
 
-            if all(message_snipet not in task.status.message for message_snipet in TMP_BROKEN):
+            if (not task.output and
+                all(message_snipet not in task.status.message for message_snipet in TMP_BROKEN)):
                 continue
 
-            # TODO: Implement dependencies and test
-            # task._dependencies = task_document['bounds.dependencies']
             try:
-                self.update_status(task, mahler.core.status.FailedOver('Crashed because of broken node'))
+                if task.output:
+                    new_status = mahler.core.status.Completed('Failover completed trial')
+                    self.update_status(task, new_status, _force=True)
+                else:
+                    new_status = mahler.core.status.FailedOver('Crashed because of broken node')
+                    self.update_status(task, new_status)
                 self.update_report(task.to_dict())
             except (ValueError, RaceCondition) as e:
                 logger.debug('Task {} status changed concurrently'.format(task.id))
@@ -408,7 +419,7 @@ class Registrar(object):
     #         raise RaceCondition("Cannot change priority")
     #     db.table('tasks.priorities').insert()
 
-    def update_status(self, task, status, current_status=None):
+    def update_status(self, task, status, current_status=None, _force=False):
         # Avoid fresh status, update_status execution was intended based on a status
         # that may be different than the most recent one, we don't want to test based on a
         # different one..
@@ -421,7 +432,7 @@ class Registrar(object):
             raise ValueError("Task was not fully initialized yet, cannot set status: {}".format(
                                  status))
 
-        if not status.can_follow(current_status):
+        if not status.can_follow(current_status) and not _force:
             raise ValueError("Task with status {} cannot be set to {}".format(
                                  current_status, status))
 
@@ -492,11 +503,11 @@ class Registrar(object):
     def retrieve_tags(self, task):
         return self._db.retrieve_events('tags', task)
 
-    def set_output(self, task, output):
+    def set_output(self, task, output, _force=False):
         # TODO: Check status as well as process ID
         # assert mahler.core.status.is_running(task, local=True)
         # TODO: Implement...
-        if task.output is not None:
+        if task.output is not None and not _force:
             raise RuntimeError('Cannot set output of task {} twice'.format(task.id))
         self._db.set_output(task, output)
         self.update_report(task.to_dict(), update_output=True)
