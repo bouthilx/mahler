@@ -52,7 +52,8 @@ def load_modules_init_parser(subparsers, plugins):
     init_subparsers = init_parser.add_subparsers(dest='init', help='sub-command help')
 
     for scheduler_name, scheduler_module in plugins.items():
-        scheduler_module.build_init_parser(init_subparsers)
+        if hasattr(scheduler_module, 'build_init_parser'):
+            scheduler_module.build_init_parser(init_subparsers)
 
 
 def load_modules_run_parser(subparsers, plugins):
@@ -64,8 +65,9 @@ def load_modules_run_parser(subparsers, plugins):
     run_subparsers = run_parser.add_subparsers(dest='run', help='sub-command help')
 
     for scheduler_name, scheduler_module in plugins.items():
-        run_subparser = scheduler_module.build_run_parser(run_subparsers)
-        run_subparser.add_argument('commandline', nargs=argparse.REMAINDER)
+        if hasattr(scheduler_module, 'build_run_parser'):
+            run_subparser = scheduler_module.build_run_parser(run_subparsers)
+            run_subparser.add_argument('commandline', nargs=argparse.REMAINDER)
 
 
 def load_modules_info_parser(subparsers, plugins):
@@ -77,7 +79,8 @@ def load_modules_info_parser(subparsers, plugins):
     info_subparsers = info_parser.add_subparsers(dest='info', help='sub-command help')
 
     for scheduler_name, scheduler_module in plugins.items():
-        scheduler_module.build_info_parser(info_subparsers)
+        if hasattr(scheduler_module, 'build_info_parser'):
+            scheduler_module.build_info_parser(info_subparsers)
 
 
 def load_modules_submit_parser(subparsers, plugins):
