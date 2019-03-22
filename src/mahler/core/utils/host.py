@@ -2,7 +2,7 @@ import logging
 import os
 import platform
 import subprocess
-import xml
+import xml.etree.ElementTree
 
 import bson
 
