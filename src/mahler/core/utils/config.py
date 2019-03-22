@@ -76,7 +76,7 @@ import os
 
 import yaml
 
-from mahler.core.utils.flatten import flatten
+from mahler.core.utils.flatten import flatten, unflatten
 
 logger = logging.getLogger(__name__)
 
@@ -196,8 +196,13 @@ class Configuration(object):
             A general object to set an option.
         """
         keys = key.split(".")
+        # Key is a dict
+        if len(keys) > 1 and keys[0] in self.config:
+            config_value = flatten(getattr(self, keys[0]))
+            config_value['.'.join(keys[1:])] = value
+            setattr(self, keys[0], unflatten(config_value))
         # Recursively in sub configurations
-        if len(keys) > 1:
+        elif len(keys) > 1:
             subconfig = getattr(self, keys[0]) 
             if subconfig is None:
                 raise KeyError("'{}' is not defined in configuration.".format(keys[0]))
@@ -237,7 +242,7 @@ class Configuration(object):
             The name of the configuration setting. This must be a valid
             Python attribute name i.e. alphanumeric with underscores.
         type : function
-            A function such as ``float``, ``int`` or ``str`` which takes
+            A function such as ``float``, ``int``, ``str`` or ``dict`` which takes
             the configuration value and returns an object of the correct
             type.  Note that the values retrieved from environment
             variables are always strings, while those retrieved from the
@@ -295,7 +300,7 @@ def parse_config_file(configpath, config, base=None):
             for k, v in flatten(cfg).items():
                 try:
                     config[k] = v
-                except KeyError as e:
+                except (KeyError, TypeError) as e:
                     logger.info('Configuration key {} is not defined, ignoring it.'.format(k))
     except IOError as e:  # default file could not be found
         logger.debug(e)

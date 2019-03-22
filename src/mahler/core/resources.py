@@ -40,6 +40,10 @@ def build(**kwargs):
         raise ValueError(
             "No type provided to build a scheduler:\n{}".format(pprint.pformat(kwargs)))
 
+    for key in list(kwargs.keys()):
+        if kwargs[key] is None:
+            kwargs.pop(key)
+
     scheduler_config = config.scheduler[scheduler_type].to_dict()
     scheduler_config.update(kwargs)
     
