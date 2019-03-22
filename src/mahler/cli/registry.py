@@ -86,7 +86,7 @@ def load_modules_init_parser(subparsers, plugins):
 
 def main(args):
     # TODO Support setting name
-    registrar = mahler.core.registrar.build(name='mongodb')
+    registrar = mahler.core.registrar.build()  # name='mongodb')
     args.pop('subfunc')(registrar, **args)
 
 
