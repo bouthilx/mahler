@@ -69,8 +69,8 @@ class Task(object):
         self.heartbeat = int(heartbeat)
         self._priority = EventBasedItemAttribute(self, 'priority')
         self._status = EventBasedItemAttribute(self, 'status')
+        self._host = EventBasedItemAttribute(self, 'host')
         self._tags = EventBasedListAttribute(self, 'tags')
-        # self._host
         self._stdout = EventBasedListAttribute(self, 'stdout')
         self._stderr = EventBasedListAttribute(self, 'stderr')
         self._output = None
@@ -267,13 +267,15 @@ class Task(object):
         return status
 
     @property
-    def tags(self):
-        return [tag['tag'] for tag in self._tags.value]
+    def host(self):
+        if not self._host.value:
+            return {}
+
+        return copy.deepcopy(self._host.value)
 
     @property
-    def host(self):
-        # TODO
-        return ""  # self._host
+    def tags(self):
+        return [tag['tag'] for tag in self._tags.value]
 
     @property
     def stdout(self):
@@ -341,6 +343,18 @@ class Task(object):
             output=self.output,
             volume=self.volume)
 
+        # Only use last version in reports
+        # facility:
+        #     <host>:
+        #         CPUs
+        #         GPUs
+        #         platform
+        #         env
+        #           contains (among other things)
+        #           <clustername>
+        #           <user>
+        #           <slurm_job_nodelist>
+
         if self.id:
             task_document['id'] = self.id
 
@@ -383,6 +397,8 @@ class Task(object):
             report_document['registry']['duration'] = self.duration
             report_document['registry']['status'] = self.status.name
             report_document['registry']['tags'] = self.tags
+
+            report_document['facility']['host'] = self.host
 
         report_document['timestamp'] = {
             'status': self._status.history[-1]['id'] if self._status.history else None,

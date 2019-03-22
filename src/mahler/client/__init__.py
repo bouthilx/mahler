@@ -58,10 +58,11 @@ class Client(object):
         except StopIteration:
             return None
 
-    def find(self, id=None, tags=tuple(), container=None, status=None, _return_doc=False,
+    def find(self, id=None, tags=tuple(), container=None, status=None, host=None, _return_doc=False,
              _projection=None):
-        return self.registrar.retrieve_tasks(id=id, tags=tags, container=container, status=status, 
-                                             _return_doc=_return_doc, _projection=_projection)
+        return self.registrar.retrieve_tasks(
+            id=id, tags=tags, container=container, status=status, host=host,
+            _return_doc=_return_doc, _projection=_projection)
 
     def add_tags(self, task, tags, message=''):
         rval = self.registrar.add_tags(task, tags, message)

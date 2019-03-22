@@ -595,7 +595,8 @@ class Dispatcher(object):
         tasks = registrar.retrieve_tasks(
             tags=tags, container=container,
             status=mahler.core.status.Queued(''),
-            limit=100, sort=[('registry.reported_on', 1)])
+            limit=100, sort=[('registry.reported_on', 1)],
+            host=[fetch_host_name(), None])
 
         # TODO: Sort by priority
         # TODO: Pick tasks based on what is available in state (needs dependencies implementation)

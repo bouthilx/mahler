@@ -16,6 +16,7 @@ from mahler.core import config
 from mahler.core.task import Task
 from mahler.core.operator import Operator
 from mahler.core.utils.errors import RaceCondition
+from mahler.core.utils.host import fetch_host_info
 import mahler.core.status
 
 
@@ -386,11 +387,12 @@ class Registrar(object):
         self._db.update_report(task_report, update_output=update_output, upsert=upsert)
 
     def retrieve_tasks(self, id=None, tags=tuple(), container=None, status=None, limit=None,
-                       sort=None, use_report=True, _return_doc=False, _projection=None):
+                       sort=None, host=None, use_report=True, _return_doc=False, _projection=None):
         """
         """
-        task_iterator = self._db.retrieve_tasks(id, tags, container, status, limit=limit, sort=sort,
-                                                use_report=use_report, projection=_projection)
+        task_iterator = self._db.retrieve_tasks(
+            id, tags, container, status, limit=limit, sort=sort, host=host, use_report=use_report,
+            projection=_projection)
         for task_document in task_iterator:
             if _return_doc:
                 yield task_document
@@ -405,11 +407,23 @@ class Registrar(object):
     def reserve(self, task, message="for execution"):
         """
         """
-        # TODO: Fetch host and PID and set
         current_status = task.status
         if not isinstance(current_status, mahler.core.status.Queued):
             raise ValueError("Task with status {} cannot be reserved".format(current_status))
-        return self.update_status(task, mahler.core.status.Reserved(message), current_status)
+        self.update_status(task, mahler.core.status.Reserved(message), current_status)
+
+        # TODO: Fetch host and PID and set
+        self._update_host(task)
+
+    def _update_host(self, task):
+        # TODO: In workers, query based on host. Only query same host or no host.
+        ref_id = task._host.history[-1]['inc_id'] if task._host.history else None
+        event = self.create_event('set', task.id, fetch_host_info(), ref_id=ref_id)
+        # Fail if another process changed the status meanwhile
+        # if ref_id + 1 exist:
+        #     raise RaceCondition(Current status was not the most recent one)
+        db_operation = self._db.add_event('host', event)
+        task._host.history.append(event)
 
     # def update_priority(self, task, priority):
     #     # TODO: Create timestamp
