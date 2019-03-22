@@ -15,6 +15,7 @@ import sys
 import weakref
 
 from mahler.core.utils.std import stdredirect
+from mahler.core.utils.host import fetch_host_name
 import mahler.core.registrar
 import mahler.core.utils.errors
 

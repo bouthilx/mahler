@@ -21,7 +21,7 @@ def fetch_host_info():
     host_info['cpus'] = fetch_cpus_info()
     host_info['gpus'] = fetch_gpus_info()
     host_info['platform'] = fetch_platform_info()
-    host_info['env'] = fetch_host_env_vars(config)
+    host_info['env'] = fetch_host_env_vars()
 
     return host_info
 
@@ -116,7 +116,7 @@ ENV_VARS = ([
     'SLURMD_NODENAME'])
 
 
-def fetch_host_env_vars(config):
+def fetch_host_env_vars():
     host_env_vars = dict()
     for env_var, value in os.environ.items():
         if env_var.startswith('_'):
