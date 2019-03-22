@@ -318,7 +318,7 @@ def main(tags=tuple(), container=None, working_dir=None, max_tasks=10e10, deplet
 def _main(tags=tuple(), container=None, max_tasks=10e10, depletion_patience=10,
           exhaust_wait_time=20, max_failedover_attempts=3):
     # TODO: Support config
-    registrar = mahler.core.registrar.build(name='mongodb')
+    registrar = mahler.core.registrar.build()
     dispatcher = Dispatcher(registrar)
     # tasks = list(technician.query(registrar))
 

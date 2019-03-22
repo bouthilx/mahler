@@ -30,7 +30,7 @@ class Client(object):
     CURRENT = 'current'
 
     def __init__(self, **kwargs):
-        registrar = kwargs.get('registrar', dict(name='mongodb'))
+        registrar = kwargs.get('registrar', dict())
         if isinstance(registrar, mahler.core.registrar.Registrar):
             self.registrar = registrar
         elif isinstance(registrar, dict):
