@@ -17,6 +17,7 @@ class EventBasedAttribute(object):
     def __init__(self, task, name):
         self.task = task
         self.name = name
+        self.timestamp = None
         self.history = []
 
     def __iter__(self):
@@ -57,9 +58,12 @@ class EventBasedAttribute(object):
     def refresh(self):
         if self.task._registrar:
             # self.history = self.task._registrar.retrieve_status(self.task)
-            self.history = list(
-                sorted(self.task._registrar._db.retrieve_events(self.name, self.task),
-                       key=lambda event: event['id'].generation_time))
+            events = self.task._registrar._db.retrieve_events(
+                self.name, self.task, updated_after=self.timestamp)
+            self.history += list(sorted(events, key=lambda event: event['id'].generation_time))
+
+            if self.history:
+                self.timestamp = str(self.history[-1]['id'])
         # query = {"trial_id": self._trial_id}
         # lower_bound, upper_bound = self._interval
         # if (self.history and

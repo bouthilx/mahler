@@ -65,6 +65,8 @@ class Client(object):
             _return_doc=_return_doc, _projection=_projection)
 
     def add_tags(self, task, tags, message=''):
+        task = self._create_shallow_task(task)
+        task._tags.refresh()
         rval = self.registrar.add_tags(task, tags, message)
         self.registrar.update_report(task.to_dict())
         return rval
@@ -79,7 +81,6 @@ class Client(object):
         if not isinstance(task, mahler.core.task.Task):
             task = mahler.core.task.Task(op=None, arguments=None, id=task, name=None,
                                          registrar=self.registrar)
-            task._status.refresh()
 
         return task
 
@@ -104,9 +105,9 @@ class Client(object):
             print(type(e), str(e))
             raise
 
-
     def _update_status(self, task, new_status):
         task = self._create_shallow_task(task)
+        task._status.refresh()
         rval = self.registrar.update_status(task, new_status)
         self.registrar.update_report(task.to_dict())
         return rval
