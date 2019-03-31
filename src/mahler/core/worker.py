@@ -15,7 +15,7 @@ import sys
 import weakref
 
 from mahler.core.utils.std import stdredirect
-from mahler.core.utils.host import fetch_host_name
+from mahler.core.utils.host import fetch_host_name, ResourceUsageMonitor
 import mahler.core.registrar
 import mahler.core.utils.errors
 
@@ -191,23 +191,30 @@ def run(registrar, task, state, stdout, stderr):
         task_thread = TaskProcess(task.get_offline(), state, stdout, stderr, data, volume)
         task_thread.start()
 
+        usage_monitor = ResourceUsageMonitor(task_thread.pid)
+
         start = time.time()
         while task_thread.is_alive():
 
             if not stdout_queue.empty():
                 try:
-                    registrar.update_stdout(task, stdout_queue.get(timeout=5))
+                    registrar.update_stdout(task, stdout_queue.get(timeout=0.01))
                 except queue.Empty as e:
                     pass
 
             if not stderr_queue.empty():
                 try:
-                    registrar.update_stderr(task, stderr_queue.get(timeout=5))
+                    registrar.update_stderr(task, stderr_queue.get(timeout=0.01))
                 except queue.Empty as e:
                     pass
 
+            time.sleep(1)
+            usage_monitor.update()
+
             if heartbeat(registrar, task, slept=time.time() - start):
                 start = time.time()
+                registrar.add_metric(task, 'usage', usage_monitor.get())
+                usage_monitor.reset()
 
         # Will raise the error if any
         task_thread.join()

@@ -1,12 +1,16 @@
+import copy
 import logging
 import os
 import platform
+import psutil
 import subprocess
 import xml.etree.ElementTree
 
 import bson
+import numpy
 
 import mahler.core
+from mahler.core.utils.flatten import flatten, unflatten
 
 
 logger = logging.getLogger(__name__)
@@ -147,3 +151,129 @@ def fetch_gpus_info():
         gpus_info[child.attrib['id'].replace(".", ",")] = gpu
 
     return gpus_info
+
+
+def get_cpu_usage(pid):
+    try:
+        process = psutil.Process(pid)
+
+        with process.oneshot():
+            mem = process.memory_full_info().uss
+            cpu_percent = process.cpu_percent()
+            cpu_num = process.cpu_num()
+    except psutil._exceptions.NoSuchProcess:
+        return {str(pid): {}}
+
+    children = {}
+    total_cpu_percent = cpu_percent
+    total_mem = mem
+    cpu_nums = set([cpu_num])
+    for child in process.children(recursive=False):
+        child_stats = get_cpu_usage(child.pid)
+        child_pid = str(child.pid)
+        if not child_stats[child_pid]:
+            continue
+        children.update(child_stats)
+        child_total_stats = child_stats[child_pid]['total']
+        total_mem += child_total_stats['mem']
+        total_cpu_percent += child_total_stats['cpu_percent']
+        cpu_nums |= set(child_total_stats['cpu_nums'])
+
+    process_stats = {
+        'mem': mem,
+        'cpu_percent': cpu_percent,
+        'cpu_num': cpu_num,
+        'total': {
+            'cpu_percent': total_cpu_percent,
+            'mem': total_mem,
+            'cpu_nums': list(cpu_nums)},
+        'children': children}
+
+    return {str(pid): process_stats}
+
+
+def get_gpu_usage(pid=None):
+    gpu = {}
+
+    try:
+        nvidia_xml = subprocess.check_output(['nvidia-smi', '-q', '-x']).decode()
+    except (FileNotFoundError, OSError, subprocess.CalledProcessError):
+        return {}
+
+    for child in xml.etree.ElementTree.fromstring(nvidia_xml):
+        if child.tag != 'gpu':
+            continue
+
+        memory = child.find('fb_memory_usage')
+        process_memory = ''
+        for process_child in child.find('processes'):
+            if int(process_child.find('pid').text) == pid:
+                process_memory = process_child.find('used_memory').text
+                break
+
+        # NOTE: For now, we assume that there is a single GPU.
+        # Continue until we hit the GPU where the process resides.
+        # if not process_memory:
+        #     continue
+
+        processes = child.find('processes')
+        gpu = {
+            'id': child.attrib['id'],
+            'model': child.find('product_name').text,
+            'util': child.find('utilization').find('gpu_util').text.replace(' %', ''),
+            'memory': {
+                'total': convert_format(memory.find('total').text),
+                'used': convert_format(memory.find('used').text),
+                'free': convert_format(memory.find('free').text),
+                'process': convert_format(process_memory)
+            }}
+        break
+
+    return gpu
+
+
+class ResourceUsageMonitor:
+    def __init__(self, pid):
+        self.pid = pid
+        self.reset()
+
+    def update(self):
+
+        cpu_usage = get_cpu_usage(self.pid)
+        gpu_usage = get_gpu_usage(self.pid)
+
+        self.last_point = {'cpu': cpu_usage, 'gpu': gpu_usage}
+        flattened_last_point = flatten(self.last_point)
+        for key, values in self.stats.items():
+            values.append(int(flattened_last_point[key]))
+
+    def reset(self):
+        self.last_point = None
+        self.stats = flatten({
+            'gpu': {
+                'memory': {
+                    'process': [],
+                    'free': []},
+                'util': []},
+            'cpu.{}.total'.format(self.pid): {
+                    'cpu_percent': [],
+                    'mem': []}})
+
+    def get(self):
+        usage = flatten(self.last_point)
+        for name, values in self.stats.items():
+            array = numpy.array(values)
+            stats = {}
+            for op_name in 'mean min max std'.split():
+                stats[op_name] = float(getattr(numpy, op_name)(array))
+            usage[name] = stats
+            
+        return unflatten(usage)
+
+
+def convert_format(v):
+
+    if v.endswith(' MiB'):
+        return int(v[:-4]) * 2**20
+
+    return 0
