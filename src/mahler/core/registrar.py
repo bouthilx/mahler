@@ -489,6 +489,18 @@ class Registrar(object):
         db_operation = self._db.add_event('stderr', event)
         task._stderr.history.append(event)
 
+    def add_metric(self, task, metric_type, metric):
+        # TODO: Fetch host and PID and set
+        # assert mahler.core.status.is_running(task, local=True)
+        ref_id = task._metrics.history[-1]['inc_id'] if task._metrics.history else None
+        event = self.create_event('add', task.id, {'type': metric_type, 'value': metric},
+                                  ref_id=ref_id)
+        # Fail if another process changed the status meanwhile
+        # if ref_id + 1 exist:
+        #     raise RaceCondition(Current status was not the most recent one)
+        db_operation = self._db.add_event('metric', event)
+        task._metrics.history.append(event)
+
     def add_tags(self, task, tags, message=''):
         for tag in tags:
             if tag in task.tags:

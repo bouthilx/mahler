@@ -73,6 +73,7 @@ class Task(object):
         self._tags = EventBasedListAttribute(self, 'tags')
         self._stdout = EventBasedListAttribute(self, 'stdout')
         self._stderr = EventBasedListAttribute(self, 'stderr')
+        self._metrics = EventBasedListAttribute(self, 'metrics')
         self._output = None
         self._volume = None
         self._registrar = registrar
@@ -284,6 +285,10 @@ class Task(object):
     @property
     def stderr(self):
         return "".join(self._stderr.value)
+
+    @property
+    def metrics(self):
+        return self._metrics.value
 
     # None until completion
 

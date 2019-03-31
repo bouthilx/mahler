@@ -71,6 +71,12 @@ class Client(object):
         self.registrar.update_report(task.to_dict())
         return rval
 
+    def add_metric(self, task, stats, metric_type='stat'):
+        task = self._create_shallow_task(task)
+        task._metrics.refresh()
+        rval = self.registrar.add_metric(task, metric_type, stats)
+        return rval
+
     def remove_tags(self, task, tags):
         return
 
