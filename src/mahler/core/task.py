@@ -58,14 +58,14 @@ class Task(object):
     """
 
     def __init__(self, op, arguments, id=None, name=None, registrar=None, container=None, 
-                 heartbeat=config.heartbeat):
+                 resources=None, heartbeat=config.heartbeat):
         self.op = op
         self._arguments = arguments
         self._name = name
         self._parent = None
         self._dependencies = []
         self._container = container
-        self._resources = {}
+        self._resources = resources if resources else {}
         self.id = id
         self.heartbeat = int(heartbeat)
         self._priority = EventBasedItemAttribute(self, 'priority')

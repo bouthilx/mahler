@@ -38,9 +38,12 @@ class Client(object):
         else:
             raise ValueError("Invalid registrar argument: {}".format(registrar))
 
-    def register(self, task, priority=0, after=None, before=None, tags=tuple(), container=None):
+    def register(self, task, priority=0, after=None, before=None, tags=tuple(), container=None,
+                 resources=None):
         # TODO: Set dependencies
         task._container = container
+        if resources:
+            task._resources.update(resources)
         self.registrar.register_tasks([task])
         # self.change_priority(task, priority)
         self.add_tags(task, tags)
