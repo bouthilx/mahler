@@ -37,12 +37,6 @@ def build(parser):
         help=('Number of times to try again the execution of a broken task. Default: 3'))
 
     execute_parser.add_argument(
-        '--max-maintain', default=10, type=int,
-        help=('Maximum number of tasks to maintaint when no more tasks available. '
-              'Maintaining many tasks increases the delay between executions but improves '
-              'the throughput when there is many workers. Default: 10'))
-
-    execute_parser.add_argument(
         '--depletion-patience', default=10, type=int,
         help=('When there is no task available, number of times to try again maintenance of the '
               'tasks before giving up and terminating the worker. Default: 10'))
