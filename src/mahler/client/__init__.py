@@ -1,3 +1,5 @@
+import os
+
 import mahler.core.operator
 import mahler.core.task
 import mahler.core.registrar
@@ -18,12 +20,7 @@ def operator(restore=None, resources=None, immutable=False, resumable=False):
 
 
 def get_current_task_id():
-    if not Dispatcher.__refs__:
-        return None
-
-    task_id = next(iter(Dispatcher.__refs__)).picked_task
-
-    return task_id
+    return os.environ.get('_MAHLER_TASK_ID', None)
 
 
 class Client(object):
