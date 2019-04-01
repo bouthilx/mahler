@@ -221,7 +221,7 @@ def get_gpu_usage(pid=None):
         gpu = {
             'id': child.attrib['id'],
             'model': child.find('product_name').text,
-            'util': child.find('utilization').find('gpu_util').text.replace(' %', ''),
+            'util': int(child.find('utilization').find('gpu_util').text.replace(' %', '')),
             'memory': {
                 'total': convert_format(memory.find('total').text),
                 'used': convert_format(memory.find('used').text),
