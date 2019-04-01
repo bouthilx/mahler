@@ -1,3 +1,4 @@
+from collections import defaultdict
 import copy
 import datetime
 import logging
@@ -73,7 +74,7 @@ class Task(object):
         self._tags = EventBasedListAttribute(self, 'tags')
         self._stdout = EventBasedListAttribute(self, 'stdout')
         self._stderr = EventBasedListAttribute(self, 'stderr')
-        self._metrics = EventBasedListAttribute(self, 'metrics')
+        self._metrics = EventBasedListAttribute(self, 'metric')
         self._output = None
         self._volume = None
         self._registrar = registrar
@@ -286,14 +287,21 @@ class Task(object):
     def stderr(self):
         return "".join(self._stderr.value)
 
+    # TODO: Add a caching mechanism.
     @property
     def metrics(self):
-        return self._metrics.value
+        # TODO: Organize by types, and sort by creation time.
+        #       Make it be defaultdict(list) so that unavailable metrics can be considered as
+        #       present but empty.
+        metrics = defaultdict(list)
+        for metric in self._metrics.value:
+            metrics[metric['type']].append(metric['value'])
 
-    # None until completion
+        return metrics
 
     @property
     def output(self):
+        # None until completion
         if self._registrar is None:
             return None
 
