@@ -173,23 +173,24 @@ def get_cpu_usage(pid):
         child_pid = str(child.pid)
         if not child_stats[child_pid]:
             continue
-        children.update(child_stats)
-        child_total_stats = child_stats[child_pid]['total']
+        children.update({child_pid: child_stats[child_pid]})
+        child_total_stats = child_stats['total']
         total_mem += child_total_stats['mem']
         total_cpu_percent += child_total_stats['cpu_percent']
         cpu_nums |= set(child_total_stats['cpu_nums'])
 
     process_stats = {
-        'mem': mem,
-        'cpu_percent': cpu_percent,
-        'cpu_num': cpu_num,
+        str(pid): {
+            'mem': mem,
+            'cpu_percent': cpu_percent,
+            'cpu_num': cpu_num,
+            'children': children},
         'total': {
             'cpu_percent': total_cpu_percent,
             'mem': total_mem,
-            'cpu_nums': list(cpu_nums)},
-        'children': children}
+            'cpu_nums': list(cpu_nums)}}
 
-    return {str(pid): process_stats}
+    return process_stats
 
 
 def get_gpu_usage(pid=None):
@@ -253,9 +254,9 @@ class ResourceUsageMonitor:
             'gpu': {
                 'memory': {
                     'process': [],
-                    'free': []},
+                    'used': []},
                 'util': []},
-            'cpu.{}.total'.format(self.pid): {
+            'cpu.total': {
                     'cpu_percent': [],
                     'mem': []}})
 
