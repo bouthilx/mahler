@@ -49,4 +49,4 @@ def build(parser):
 
 
 def main(args):
-    mahler.core.worker.main(**args)
+    mahler.core.worker.start(**args)

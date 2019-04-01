@@ -1,11 +1,14 @@
 import asyncio
 import contextlib
+from collections import defaultdict
+import copy
 import datetime
 import io
 import logging
 import multiprocessing
 import multiprocessing.managers
 import os
+import pprint
 import queue
 import random
 import time
@@ -14,12 +17,21 @@ import signal
 import sys
 import weakref
 
+import cotyledon
+
+from hurry.filesize import size as print_h_size
+
 from mahler.core.utils.std import stdredirect
-from mahler.core.utils.host import fetch_host_name, ResourceUsageMonitor
+from mahler.core.utils.host import fetch_host_name, get_gpu_usage, ResourceUsageMonitor
 import mahler.core.registrar
 import mahler.core.utils.errors
+from mahler.core.utils.flatten import flatten
+
 
 logger = logging.getLogger('mahler.core.worker')
+
+
+N_WORKERS = 5
 
 # TODO: If in debug mode,
 #       when code change is detected, interrupt process and start over the worker with
@@ -29,6 +41,18 @@ logger = logging.getLogger('mahler.core.worker')
 
 STOPPING_TEMPLATE = '---\nStopping execution: {}\n---\n'
 STARTING_TEMPLATE = '---\nStarting execution: {}\n---\n'
+
+
+def convert_h_size(resources):
+    d = dict()
+    for key, value in resources.items():
+        if key.endswith('util'):
+            d[key] = '{} %'.format(value)
+        else:
+            d[key] = print_h_size(value)
+    
+    return d
+
 
 def sigterm_handler(signal, frame):
     if sigterm_handler.triggered:
@@ -179,9 +203,9 @@ def run(registrar, task, state, stdout, stderr):
     stdout_queue = manager.Queue()
     stderr_queue = manager.Queue()
 
-    stdout = StdQueue(stdout_queue, sys.stdout, mute=not logger.isEnabledFor(logging.INFO),
+    stdout = StdQueue(stdout_queue, sys.stdout, mute=True,  # not logger.isEnabledFor(logging.INFO),
                       buffer_size=1)
-    stderr = StdQueue(stderr_queue, sys.stderr, mute=not logger.isEnabledFor(logging.INFO),
+    stderr = StdQueue(stderr_queue, sys.stderr, mute=True,  # not logger.isEnabledFor(logging.INFO),
                       buffer_size=1)
 
     data = manager.dict()
@@ -314,50 +338,37 @@ def execute(registrar, state, task):
     return status
 
 
-def main(tags=tuple(), container=None, working_dir=None, max_tasks=10e10, depletion_patience=10,
-         exhaust_wait_time=20, max_failedover_attempts=3, **kwargs):
+def main(worker_id, queued, completed, working_dir=None, max_failedover_attempts=3):
 
     with tmp_directory(working_dir):
-        _main(tags=tags, container=container, max_tasks=max_tasks,
-              depletion_patience=depletion_patience, exhaust_wait_time=exhaust_wait_time,
-              max_failedover_attempts=max_failedover_attempts)
+        _main(worker_id, queued, completed, max_failedover_attempts=max_failedover_attempts)
 
 
-def _main(tags=tuple(), container=None, max_tasks=10e10, depletion_patience=10,
-          exhaust_wait_time=20, max_failedover_attempts=3):
+def _main(worker_id, queued, completed, max_failedover_attempts=3):
     # TODO: Support config
-    registrar = mahler.core.registrar.build()
-    dispatcher = Dispatcher(registrar)
-    # tasks = list(technician.query(registrar))
 
-    exhaust_failures = 0
+    registrar = mahler.core.registrar.build()
+    # tasks = list(technician.query(registrar))
 
     state = State()
 
-    for i in range(int(max_tasks)):
-        if exhaust_failures >= depletion_patience:
-            print("Patience exhausted and no more task available.")
-            break
+    while True:
+        logger.info('Worker {} waiting for a task.'.format(worker_id))
+        task_id = queued.get(block=True)
+        task = list(registrar.retrieve_tasks(id=task_id))[0]
 
+        # Make sure the task is new or was run on the same cluster.
+        if task.host and task.host['env']['clustername'] != fetch_host_name():
+            logger.warning('Task {} was executed on a different host: {}'.format(
+                task.id, task.host['env']['clustername']))
+         
         try:
-            # TODO: When choosing the trial to execute, limit it based on the current container
-            #       being used. Cannot pick trials which should be executed in a different
-            #       container.
-
-            # NOTE: Dispatcher should turn the task-document into an engine task,
-            #       loading the volume at the same time
-            task = dispatcher.pick(registrar, tags, container, state)  # tasks, registrar)
-            exhaust_failures = 0
-        except RuntimeError:
-            logger.info('Dispatcher could not pick any task for execution.')
-            # NOTE: Maintainance could be done in parallel while a task is being executed.
-            exhaust_failures += 1
-            print("{} (UTC): No more task available, waiting {} seconds before "
-                  "trying again. {} attemps remaining.".format(
-                      datetime.datetime.utcnow(), exhaust_wait_time,
-                      depletion_patience - exhaust_failures))
-            time.sleep(exhaust_wait_time)
+            registrar.reserve(task)
+        except (ValueError, mahler.core.registrar.RaceCondition) as e:
+            logger.info('Task {} reserved by concurrent worker'.format(task.id))
+            completed.put(task_id)
             continue
+
 
         # set status of trial as running
         # Execute command from db
@@ -365,7 +376,6 @@ def _main(tags=tuple(), container=None, max_tasks=10e10, depletion_patience=10,
         # state.update(task=self, data=data, volume=volume)
         # TODO: inside task.run, convert data into measurements and volume into
         #       volume documents. Note that they are not registered yet.
-        # TODO: Add heartbeat, maybe set in the worker itself.
         # TODO: If task is immutable, state should be kept.
         #               is mutable, state should be emptied in task and rebuilt based on output
         #       NOTE: This is to avoid memory leak causing out of memory errors.
@@ -388,9 +398,10 @@ def _main(tags=tuple(), container=None, max_tasks=10e10, depletion_patience=10,
         # NOTE: Checkpoint should be object specific, so that we can easily map
         #       {volume-name: {'file': file-like, 'object': object}}
 
-        # TODO: Add heartbeat for reserved and running
+        # TODO: Add heartbeat for reserved as well
         print('Executing task: {}'.format(task.id))
         assert task.status.name == 'Reserved'
+        
         registrar.update_status(task, mahler.core.status.Running('start execution'))
         registrar.update_report(task.to_dict())
         try:
@@ -399,18 +410,8 @@ def _main(tags=tuple(), container=None, max_tasks=10e10, depletion_patience=10,
         except KeyboardInterrupt as e:
             try:
                 print('Execution of task {} suspended by user (KeyboardInterrupt)'.format(task.id))
-                print()
-                print('Execution will resume in 5 seconds.')
-                print('To stop the worker, press crtl-c again before the countdown.')
-                print()
-                for i in range(5, 0, -1):
-                    print('{}...'.format(i))
-                    time.sleep(1)
-                print()
+                time.sleep(7)
             except KeyboardInterrupt as e:
-                print()
-                print('Now leaving worker...')
-                print()
                 raise SystemExit()
             finally:
                 new_status = mahler.core.status.Suspended('Suspended by user (KeyboardInterrupt)')
@@ -420,7 +421,7 @@ def _main(tags=tuple(), container=None, max_tasks=10e10, depletion_patience=10,
                 print('New status: {}'.format(new_status))
 
             print()
-            print('Now resuming worker...')
+            print('Now resuming worker {}...'.format(worker_id))
             print()
 
             continue
@@ -485,6 +486,7 @@ def _main(tags=tuple(), container=None, max_tasks=10e10, depletion_patience=10,
             print('New status: {}'.format(new_status))
 
         finally:
+            completed.put(task.id)
             registrar.update_report(task.to_dict())
 
 
@@ -557,7 +559,22 @@ class State(object):
         self.data.update(data)
 
 
-class Worker(object):
+class Worker(cotyledon.Service):
+    name = 'worker'
+
+    def __init__(self, worker_id, queued, completed, working_dir, max_failedover_attempts):
+        self.id = worker_id
+        self.queued = queued
+        self.completed = completed
+
+        self.working_dir = working_dir
+        self.max_failedover_attempts = max_failedover_attempts
+
+    def run(self):
+        main(self.id, self.queued, self.completed, self.working_dir, self.max_failedover_attempts)
+
+
+class OldWorker(object):
     def run(self, task):
         # if task needs restore 
         # create new task for the restore
@@ -586,39 +603,266 @@ class Worker(object):
         self.registrar.register_tasks([task.document])
 
 
-class Dispatcher(object):
+class Dispatcher(cotyledon.Service):
+    name = 'dispatcher'
 
-    __refs__ = weakref.WeakSet()
+    def __init__(self, worker_id, queued, completed, tags=tuple(), container=None, max_tasks=10e10,
+                 depletion_patience=10, exhaust_wait_time=20):
+        self.worker_id = worker_id
+        self.running = []
+        self.queued = queued
+        self.completed = completed
+        self.cached = {}
 
-    def __init__(self, registrar):
-        self._picked_task = None
+        self.tags = tags
+        self.container = container
 
-        Dispatcher.__refs__.add(self)
+        self.max_tasks = max_tasks
+        self.depletion_patience = depletion_patience
+        self.exhaust_wait_time = exhaust_wait_time
 
-    @property
-    def picked_task(self):
-        return self._picked_task
+        self.usage_buffer = 1.1
 
-    def pick(self, registrar, tags, container, state):
-        tasks = registrar.retrieve_tasks(
-            tags=tags, container=container,
+        self.tasks_completed = 0
+
+    def get_task_available(self):
+        projection = {'facility.resources': 1}  # TODO: Maybe we need more fields...
+        task_docs = self.registrar.retrieve_tasks(
+            tags=self.tags, container=self.container,
             status=mahler.core.status.Queued(''),
             limit=100, sort=[('registry.reported_on', 1)],
-            host=[fetch_host_name(), None])
+            host=[fetch_host_name(), None],
+            _return_doc=True, _projection=projection)
 
+        def compute_usage(task):
+            return self.compute_max_metric(task), task
+        
+        tasks = []
         # TODO: Sort by priority
         # TODO: Pick tasks based on what is available in state (needs dependencies implementation)
-        for task in tasks:
-            # To reduce race conditions
-            if random.random() >= 0.5:
-                continue
+        for i, task_doc in enumerate(task_docs):
+
+            if task_doc['id'] not in self.cached:
+                task = mahler.core.task.Task(
+                    op=None, arguments=None, id=task_doc['id'], name=None,
+                    resources=task_doc['facility']['resources'], registrar=self.registrar)
+                task._metrics.refresh()
+                tasks.append((self.compute_max_metric(task), task))
+
+        for usage, task in sorted(tasks, reverse=True, key=lambda t: t[0]['gpu.memory']):
+            yield usage, task
+
+    def cache(self, task):
+        self.cached[task.id] = task  # , self.compute_max_metric(task)
+
+    def queue(self, task):
+        self.cache(task)
+        self.queued.put(task.id)
+
+    def get_cached(self):
+        while not self.completed.empty():
+            try:
+                task_id = self.completed.get(timeout=0.01)
+            except queue.Empty:
+                break
+
+            self.cached.pop(task_id)
+            self.tasks_completed += 1
+
+        summed_resources = defaultdict(int)
+        for task in self.cached.values():
+            max_metrics = self.compute_max_metric(task)
+            for name, value in max_metrics.items():
+                summed_resources[name] += value
+
+        return summed_resources
+
+    def get_resources_available(self):
+        usage = get_gpu_usage()
+        # We assume we are alone on the gpu
+        avail = flatten({
+            'gpu': {
+                'memory': usage['memory']['total'],
+                'util': 100}})  # - usage['util']}})
+
+        cached = self.get_cached()
+
+        # TODO: Consider cpu mem and cpu_percent as well
+
+        for name, value in cached.items():
+            avail[name] -= value
+
+        # TODO: test this for cases where estimation is to optimistic.
+        avail['gpu.util'] = min(avail['gpu.util'], 100 - usage['util'])
+
+        return avail
+
+    def compute_max_metric(self, task):
+        # NOTE: Don't trust metrics accumulated before 10 minutes (heartbeat=1min)
+        #       A model may not be executed before that point.
+        #       If no hints given by user in resources.usage, then assume the worst.
+        #       This will limit crashes and we can recover efficiency when enough 
+        #       metrics have been accumulated.
+        WORST_GPU_MEMORY_USAGE = 10 * 2 ** 30  # 10GB
+        WORST_GPU_UTIL = 90  # 90 %
+        stats = {}
+        if len(task.metrics['usage']) < 2:
+            resources = flatten(task.resources)
+            stats['gpu'] = {
+                'memory': resources.get('usage.gpu.memory', WORST_GPU_MEMORY_USAGE),
+                'util': resources.get('usage.gpu.util', WORST_GPU_UTIL)}
+            # task.resources['usage']['cpu']['total']['cpu_percent']
+            # task.resources['usage']['cpu']['total']['mem']
+        else:
+            memory = 0
+            total_mem_used = 0
+            util = 0
+            for usage in task.metrics['usage']:
+                if usage['gpu']['memory']['process']['max'] > memory:
+                    memory = usage['gpu']['memory']['process']['max']
+                    total_mem_used = usage['gpu']['memory']['used']['max']
+                    # We use mean for util because reaching 100 is not critical.
+                    # Well... it is simply impossible.
+                    util = usage['gpu']['util']['mean']
+
+            stats['gpu'] = {
+                'memory': memory,
+                'util': int(memory / total_mem_used * util + 0.5)}
+
+            # TODO: Include cpu stats for dispatching decisions.
+
+        stats = flatten(stats)
+
+        logger.debug('Expected usage for task {}:\n{}'.format(
+            task.id, pprint.pformat(convert_h_size(stats))))
+
+        return stats
+
+    def have_enough(self, usage, resources):
+        return all(usage[key] * self.usage_buffer < resources[key] for key in usage.keys())
+
+    def increase_usage(self, resources, usage):
+        summed_resources = copy.deepcopy(resources)
+        for name, value in usage.items():
+            summed_resources[name] -= value
+
+        return summed_resources
+
+    def run(self):
+
+        self.registrar = mahler.core.registrar.build()
+
+        exhaust_failures = 0
+        while self.tasks_completed < self.max_tasks:
 
             try:
-                registrar.reserve(task)
-                self._picked_task = str(task.id)
-                return task
-            except (ValueError, mahler.core.registrar.RaceCondition) as e:
-                logger.info('Task {} reserved by concurrent worker'.format(task.id))
-                continue
+                if exhaust_failures >= self.depletion_patience and not self.cached:
+                    print("Patience exhausted and no more task available. "
+                          "No more workers. Leaving now...")
+                    raise SystemExit(0)
+                elif exhaust_failures >= self.depletion_patience:
+                    print("Patience exhausted and no more task available. "
+                          "Waiting for worker...")
+                    time.sleep(self.exhaust_wait_time * 10)
+                    exhaust_failures -= 1
 
-        raise RuntimeError("No task available")
+                queued = False
+                found_tasks = False
+                resources_available = self.get_resources_available()
+                logger.info('Attempting to fetch tasks')
+                logger.debug(pprint.pformat(convert_h_size(resources_available)))
+                # TODO: Sort by inverse resources usage, so that expensive are queued first
+                for usage, task in self.get_task_available():
+                    found_tasks = True 
+                    exhaust_failures = 0
+                    if not self.cached or self.have_enough(usage, resources_available):
+                        self.queue(task)
+                        queued = True
+                        resources_available = self.increase_usage(resources_available, usage)
+                        logger.info('Queued task {}.'.format(task.id))
+                        logger.debug(pprint.pformat(convert_h_size(resources_available)))
+
+                if not found_tasks:
+                    logger.info('Dispatcher could not pick any task for execution.')
+                    # NOTE: Maintainance could be done in parallel while a task is being executed.
+                    exhaust_failures += 1
+                    print("{} (UTC): No more task available, waiting {} seconds before "
+                          "trying again. {} attemps remaining.".format(
+                              datetime.datetime.utcnow(), self.exhaust_wait_time,
+                              self.depletion_patience - exhaust_failures))
+                    time.sleep(self.exhaust_wait_time)
+                elif not queued:
+                    print()
+                    print("Waiting for free resources to queue additional tasks.")
+                    print()
+                    print('Available resources:')
+                    pprint.pprint(convert_h_size(resources_available))
+                    print()
+                    print('Resources usage estimation:')
+                    for task in self.cached.values():
+                        print('Task {}: {}'.format(task.id, ' '.join(sorted(task.tags))))
+                        pprint.pprint(convert_h_size(self.compute_max_metric(task)))
+                    print()
+                    time.sleep(60)
+
+            except KeyboardInterrupt as e:
+                try:
+                    print('')
+                    print('Execution will resume in 5 seconds.')
+                    print('To stop the workers, press crtl-c again before the countdown.')
+                    print()
+                    for i in range(5, 0, -1):
+                        print('{}...'.format(i))
+                        time.sleep(1)
+                    print()
+                except KeyboardInterrupt as e:
+                    print()
+                    print('Now leaving workers...')
+                    print()
+                    raise SystemExit()
+
+                print()
+                print('Now resuming workers...')
+                print()
+
+
+class Manager(cotyledon.ServiceManager):
+    def __init__(self, tags, container, max_tasks,
+                 depletion_patience, exhaust_wait_time, 
+                 working_dir, max_failedover_attempts):
+        super(Manager, self).__init__()
+        data_manager = multiprocessing.Manager()
+        queued = data_manager.Queue()
+        completed = data_manager.Queue()
+        dispatcher = self.add(Dispatcher, args=(queued, completed, tags, container, max_tasks,
+                                                depletion_patience, exhaust_wait_time))
+        self.add(Worker, args=(queued, completed, working_dir, max_failedover_attempts), workers=5)
+
+        self.max_failedover_attempts = 5
+
+        def on_dead_worker(service_id, worker_id, exitcode):
+            if service_id == dispatcher and exitcode == 0:
+                self.shutdown()
+            else:
+                self.max_failedover_attempts -= 1
+                print('A worker crashed. {} restart '
+                      'remainings.'.format(self.max_failedover_attempts))
+                if self.max_failedover_attempts <= 0:
+                    self.shutdown()
+        
+        self.register_hooks(on_dead_worker=on_dead_worker)
+
+
+def start(tags=tuple(), container=None, max_tasks=10e10,
+          depletion_patience=10, exhaust_wait_time=20, working_dir=None, max_failedover_attempts=3,
+          debug=False):
+
+    # data_manager = multiprocessing.Manager()
+    # queued = data_manager.Queue()
+    # completed = data_manager.Queue()
+
+    # main(0, queued, completed, working_dir=None, max_failedover_attempts=3)
+
+    Manager(tags=tags, container=container, max_tasks=max_tasks,
+            depletion_patience=depletion_patience, exhaust_wait_time=exhaust_wait_time, 
+            working_dir=working_dir, max_failedover_attempts=max_failedover_attempts).run()
