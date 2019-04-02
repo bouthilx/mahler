@@ -29,7 +29,7 @@ setup_args = dict(
     packages=find_namespace_packages(where='src'),
     package_dir={'': 'src'},
     include_package_data=True,
-    install_requires=['PyYAML', 'appdirs', 'tblib'],
+    install_requires=['PyYAML', 'appdirs', 'tblib', 'cotyledon', 'hurry.filesize', 'lxml', 'psutil'],
     tests_require=tests_require,
     setup_requires=['setuptools>=v40.1.0', 'appdirs', 'pytest-runner>=2.0,<3dev'],
     extras_require=dict(test=tests_require),
