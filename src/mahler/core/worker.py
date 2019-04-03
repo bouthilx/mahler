@@ -725,9 +725,14 @@ class Dispatcher(cotyledon.Service):
                     # Well... it is simply impossible.
                     util = usage['gpu']['util']['mean']
 
+            if total_mem_used == 0.:
+                util = 0
+            else:
+                util = int(memory / total_mem_used * util + 0.5)
+
             stats['gpu'] = {
                 'memory': memory,
-                'util': int(memory / total_mem_used * util + 0.5)}
+                'util': util}
 
             # TODO: Include cpu stats for dispatching decisions.
 
