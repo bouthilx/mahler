@@ -43,6 +43,10 @@ STOPPING_TEMPLATE = '---\nStopping execution: {}\n---\n'
 STARTING_TEMPLATE = '---\nStarting execution: {}\n---\n'
 
 
+def random_sleep(sleep_time, min_time=0, var_time=None):
+    time.sleep(min(min_time, random.gauss(sleep_time, var_time)))
+
+
 def convert_h_size(resources):
     d = dict()
     for key, value in resources.items():
@@ -634,9 +638,6 @@ class Dispatcher(cotyledon.Service):
             host=[fetch_host_name(), None],
             _return_doc=True, _projection=projection)
 
-        def compute_usage(task):
-            return self.compute_max_metric(task), task
-        
         tasks = []
         # TODO: Sort by priority
         # TODO: Pick tasks based on what is available in state (needs dependencies implementation)
@@ -649,8 +650,15 @@ class Dispatcher(cotyledon.Service):
                 task._metrics.refresh()
                 tasks.append((self.compute_max_metric(task), task))
 
-        for usage, task in sorted(tasks, reverse=True, key=lambda t: t[0]['gpu.memory']):
-            yield usage, task
+        sorted_tasks = list(sorted(tasks, reverse=True, key=lambda t: t[0]['gpu.memory']))
+        n_tasks = len(sorted_tasks)
+
+        # NOTE: Randomizing list to minimize conflicts, but still give higher priority to
+        #       computationally expensive tasks.
+        while n_tasks > 0:
+            index = min(random.randint(0, 5), n_tasks - 1)
+            yield sorted_tasks.pop(index)
+            n_tasks -= 1
 
     def cache(self, task):
         self.cached[task.id] = task  # , self.compute_max_metric(task)
@@ -698,7 +706,7 @@ class Dispatcher(cotyledon.Service):
         return avail
 
     def compute_max_metric(self, task):
-        # NOTE: Don't trust metrics accumulated before 10 minutes (heartbeat=1min)
+        # NOTE: Don't trust metrics accumulated before 2 minutes (heartbeat=1min)
         #       A model may not be executed before that point.
         #       If no hints given by user in resources.usage, then assume the worst.
         #       This will limit crashes and we can recover efficiency when enough 
@@ -768,7 +776,7 @@ class Dispatcher(cotyledon.Service):
                 elif exhaust_failures >= self.depletion_patience:
                     print("Patience exhausted and no more task available. "
                           "Waiting for worker...")
-                    time.sleep(self.exhaust_wait_time * 10)
+                    random_sleep(self.exhaust_wait_time * 10)
                     exhaust_failures -= 1
 
                 queued = False
@@ -776,7 +784,6 @@ class Dispatcher(cotyledon.Service):
                 resources_available = self.get_resources_available()
                 logger.info('Attempting to fetch tasks')
                 logger.debug(pprint.pformat(convert_h_size(resources_available)))
-                # TODO: Sort by inverse resources usage, so that expensive are queued first
                 for usage, task in self.get_task_available():
                     found_tasks = True 
                     exhaust_failures = 0
@@ -786,6 +793,7 @@ class Dispatcher(cotyledon.Service):
                         resources_available = self.increase_usage(resources_available, usage)
                         logger.info('Queued task {}.'.format(task.id))
                         logger.debug(pprint.pformat(convert_h_size(resources_available)))
+                        random_sleep(5, min_time=1, var_time=2)
 
                 if not found_tasks:
                     logger.info('Dispatcher could not pick any task for execution.')
@@ -795,7 +803,7 @@ class Dispatcher(cotyledon.Service):
                           "trying again. {} attemps remaining.".format(
                               datetime.datetime.utcnow(), self.exhaust_wait_time,
                               self.depletion_patience - exhaust_failures))
-                    time.sleep(self.exhaust_wait_time)
+                    random_sleep(self.exhaust_wait_time)
                 elif not queued:
                     print()
                     print("Waiting for free resources to queue additional tasks.")
@@ -808,7 +816,9 @@ class Dispatcher(cotyledon.Service):
                         print('Task {}: {}'.format(task.id, ' '.join(sorted(task.tags))))
                         pprint.pprint(convert_h_size(self.compute_max_metric(task)))
                     print()
-                    time.sleep(60)
+                    sys.stdout.flush()
+                    sys.stderr.flush()
+                    random_sleep(60, min_time=30, var_time=10)
 
             except KeyboardInterrupt as e:
                 try:
