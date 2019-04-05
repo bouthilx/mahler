@@ -19,6 +19,7 @@ class EventBasedAttribute(object):
         self.name = name
         self.timestamp = None
         self.history = []
+        self.last_item = None
 
     def __iter__(self):
         return iter(self.history)
@@ -30,7 +31,13 @@ class EventBasedAttribute(object):
         raise NotImplemented()
 
     @property
+    def events(self):
+        self.refresh(full=True)
+        return self.history
+
+    @property
     def value(self):
+        raise NotImplementedError()
         # TODO: Cache replay for some time...
         self.refresh()
         return self.replay()
@@ -50,20 +57,36 @@ class EventBasedAttribute(object):
 
     @property
     def last_id(self):
-        if not self.history:
+        if not self.last_item:
             return 0
 
-        return int(self.history[-1]['inc_id'])
+        return int(self.last_item['inc_id'])
 
-    def refresh(self):
+    def refresh(self, full=False):
         if self.task._registrar:
             # self.history = self.task._registrar.retrieve_status(self.task)
-            events = self.task._registrar._db.retrieve_events(
-                self.name, self.task, updated_after=self.timestamp)
-            self.history += list(sorted(events, key=lambda event: event['id'].generation_time))
+            if full:
+                events = self.task._registrar._db.retrieve_events(
+                    self.name, self.task,
+                    updated_after=str(self.history[-1]['id']) if self.history else None)
+                self.history += list(sorted(events, key=lambda event: event['id'].generation_time))
 
-            if self.history:
-                self.timestamp = str(self.history[-1]['id'])
+                if self.history:
+                    self.last_item = self.history[-1]
+            else:
+                events = list(self.task._registrar._db.retrieve_events(
+                    self.name, self.task,
+                    limit=2, sort=[('_id', -1)],
+                    updated_after=str(self.last_item['id']) if self.last_item else None))
+
+                if events:
+                    self.last_item = events[0]
+
+    def append_event(self, event):
+        if self.history or (not self.history and not self.last_item):
+            self.history.append(event)
+        self.last_item = event
+
         # query = {"trial_id": self._trial_id}
         # lower_bound, upper_bound = self._interval
         # if (self.history and
@@ -107,9 +130,13 @@ class EventBasedListAttribute(EventBasedAttribute):
     ADD = "add"
     REMOVE = "remove"
 
+    @property
+    def value(self):
+        return self.replay()
+
     def replay(self):
         items = []
-        for event in self.history:
+        for event in self.events:
             if event['type'] == self.ADD:
                 items.append(event['item'])
             elif event['type'] == self.REMOVE:
@@ -156,7 +183,7 @@ class EventBasedFileAttribute(EventBasedAttribute):
 
     def replay(self):
         items = []
-        for event in self.history:
+        for event in self.events:
             if event['type'] == self.ADD:
                 items.append(event['item'])
             elif event['type'] == self.REMOVE:
@@ -214,9 +241,14 @@ class EventBasedFileAttribute(EventBasedAttribute):
 class EventBasedItemAttribute(EventBasedAttribute):
     SET = "set"
 
+    @property
+    def value(self):
+        self.refresh(full=False)
+        return self.replay()
+
     def replay(self):
-        if self.history:
-            return self.history[-1]['item']
+        if self.last_item:
+            return self.last_item['item']
 
         return None
 

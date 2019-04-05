@@ -416,14 +416,7 @@ class Registrar(object):
         self._update_host(task)
 
     def _update_host(self, task):
-        # TODO: In workers, query based on host. Only query same host or no host.
-        ref_id = task._host.history[-1]['inc_id'] if task._host.history else None
-        event = self.create_event('set', task.id, fetch_host_info(), ref_id=ref_id)
-        # Fail if another process changed the status meanwhile
-        # if ref_id + 1 exist:
-        #     raise RaceCondition(Current status was not the most recent one)
-        db_operation = self._db.add_event('host', event)
-        task._host.history.append(event)
+        self._update_attribute('host', task, fetch_host_info(), op='set')
 
     # def update_priority(self, task, priority):
     #     # TODO: Create timestamp
@@ -437,8 +430,8 @@ class Registrar(object):
         # Avoid fresh status, update_status execution was intended based on a status
         # that may be different than the most recent one, we don't want to test based on a
         # different one..
-        if current_status is None and task._status.history:
-            last_status_event = task._status.history[-1]
+        if current_status is None and task._status.last_item:
+            last_status_event = task._status.last_item
             current_status = mahler.core.status.build(**last_status_event['item'])
             current_status.id = last_status_event['inc_id']
 
@@ -450,13 +443,8 @@ class Registrar(object):
             raise ValueError("Task with status {} cannot be set to {}".format(
                                  current_status, status))
 
-        event = self.create_event(
-            'set', task.id, status.to_dict(), ref_id=current_status.id if current_status else None)
-        # Fail if another process changed the status meanwhile
-        # if ref_id + 1 exist:
-        #     raise RaceCondition(Current status was not the most recent one)
-        db_operation = self._db.add_event('status', event)
-        task._status.history.append(event)
+        ref_id = current_status.id if current_status else None
+        self._update_attribute('status', task, status.to_dict(), ref_id=ref_id, op='set')
 
 
     def retrieve_status(self, task):
@@ -467,39 +455,31 @@ class Registrar(object):
     #     assert mahler.status.is_reserved(task, local=True)
     #     db.table('tasks.host').insert()
 
-    def update_stdout(self, task, stdout):
-        # TODO: Fetch host and PID and set
-        # assert mahler.core.status.is_running(task, local=True)
-        ref_id = task._stdout.history[-1]['inc_id'] if task._stdout.history else None
-        event = self.create_event('add', task.id, stdout, ref_id=ref_id)
+    def _update_attribute(self, event_type, task, item, ref_id=None, op='add'):
+        attribute = getattr(task, '_{}'.format(event_type))
+        if ref_id is None:
+            ref_id = attribute.last_item['inc_id'] if attribute.last_item else None
+        event = self.create_event(op, task.id, item, ref_id=ref_id)
         # Fail if another process changed the status meanwhile
         # if ref_id + 1 exist:
         #     raise RaceCondition(Current status was not the most recent one)
-        db_operation = self._db.add_event('stdout', event)
-        task._stdout.history.append(event)
+        db_operation = self._db.add_event(event_type, event)
+        attribute.append_event(event)
+
+    def update_stdout(self, task, stdout):
+        # TODO: Fetch host and PID and set
+        # assert mahler.core.status.is_running(task, local=True)
+        self._update_attribute('stdout', task, stdout)
 
     def update_stderr(self, task, stderr):
         # TODO: Fetch host and PID and set
         # assert mahler.core.status.is_running(task, local=True)
-        ref_id = task._stderr.history[-1]['inc_id'] if task._stderr.history else None
-        event = self.create_event('add', task.id, stderr, ref_id=ref_id)
-        # Fail if another process changed the status meanwhile
-        # if ref_id + 1 exist:
-        #     raise RaceCondition(Current status was not the most recent one)
-        db_operation = self._db.add_event('stderr', event)
-        task._stderr.history.append(event)
+        self._update_attribute('stderr', task, stderr)
 
     def add_metric(self, task, metric_type, metric):
         # TODO: Fetch host and PID and set
         # assert mahler.core.status.is_running(task, local=True)
-        ref_id = task._metrics.history[-1]['inc_id'] if task._metrics.history else None
-        event = self.create_event('add', task.id, {'type': metric_type, 'value': metric},
-                                  ref_id=ref_id)
-        # Fail if another process changed the status meanwhile
-        # if ref_id + 1 exist:
-        #     raise RaceCondition(Current status was not the most recent one)
-        db_operation = self._db.add_event('metric', event)
-        task._metrics.history.append(event)
+        self._update_attribute('metrics', task, {'type': metric_type, 'value': metric})
 
     def add_tags(self, task, tags, message=''):
         for tag in tags:
@@ -508,10 +488,7 @@ class Registrar(object):
                     tag, task.id))
                 continue
 
-            ref_id = task._tags.history[-1]['inc_id'] if task.tags else None
-            event = self.create_event('add', task.id, dict(tag=tag, message=message), ref_id=ref_id)
-            self._db.add_event('tags', event)
-            task._tags.history.append(event)
+            self._update_attribute('tags', task, dict(tag=tag, message=message))
 
     def remove_tags(self, task, tags, message=''):
         for tag in tags:
@@ -520,11 +497,7 @@ class Registrar(object):
                     "Cannot remove tag {}, it does not belong to task {}".format(
                         tag, task.id))
 
-            ref_id = task._tags.history[-1]['inc_id'] if task.tags else None
-            event = self.create_event('remove', task.id, dict(tag=tag, message=message),
-                                      ref_id=ref_id)
-            self._db.add_event('tags', event)
-            task._tags.history.append(event)
+            self._update_attribute('tags', task, dict(tag=tag, message=message), op='remove')
 
     def retrieve_tags(self, task):
         return self._db.retrieve_events('tags', task)

@@ -74,7 +74,7 @@ class Task(object):
         self._tags = EventBasedListAttribute(self, 'tags')
         self._stdout = EventBasedListAttribute(self, 'stdout')
         self._stderr = EventBasedListAttribute(self, 'stderr')
-        self._metrics = EventBasedListAttribute(self, 'metric')
+        self._metrics = EventBasedListAttribute(self, 'metrics')
         self._output = None
         self._volume = None
         self._registrar = registrar
@@ -255,7 +255,7 @@ class Task(object):
         if not self._status.value:
             return None
 
-        return self._status.history[-1]['id'].generation_time
+        return self._status.last_item['id'].generation_time
 
     @property
     def status(self):
