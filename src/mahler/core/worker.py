@@ -634,7 +634,7 @@ class Dispatcher(cotyledon.Service):
         task_docs = self.registrar.retrieve_tasks(
             tags=self.tags, container=self.container,
             status=mahler.core.status.Queued(''),
-            limit=100, sort=[('registry.reported_on', 1)],
+            limit=500, sort=[('registry.reported_on', 1)],
             host=[fetch_host_name(), None],
             _return_doc=True, _projection=projection)
 
@@ -712,7 +712,7 @@ class Dispatcher(cotyledon.Service):
         #       This will limit crashes and we can recover efficiency when enough 
         #       metrics have been accumulated.
         WORST_GPU_MEMORY_USAGE = 10 * 2 ** 30  # 10GB
-        WORST_GPU_UTIL = 90  # 90 %
+        WORST_GPU_UTIL = 60  # 90 %
         stats = {}
         if len(task.metrics['usage']) < 2:
             resources = flatten(task.resources)
