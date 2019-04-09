@@ -43,10 +43,11 @@ STOPPING_TEMPLATE = '---\nStopping execution: {}\n---\n'
 STARTING_TEMPLATE = '---\nStarting execution: {}\n---\n'
 
 
-def random_sleep(sleep_time, min_time=0, var_time=None):
+def random_sleep(sleep_time, min_time=1, var_time=None):
     if var_time is None:
         var_time = sleep_time * 0.1
-    time.sleep(min(min_time, random.gauss(sleep_time, var_time)))
+    
+    time.sleep(max(min_time, random.gauss(sleep_time, var_time)))
 
 
 def convert_h_size(resources):
