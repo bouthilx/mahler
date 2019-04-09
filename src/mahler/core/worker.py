@@ -243,7 +243,7 @@ def run(registrar, task, state, stdout, stderr):
 
             if heartbeat(registrar, task, slept=time.time() - start):
                 start = time.time()
-                registrar.add_metric(task, 'usage', usage_monitor.get())
+                registrar.add_metric(task, 'usage', usage_monitor.get(), force=True)
                 usage_monitor.reset()
 
         # Will raise the error if any

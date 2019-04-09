@@ -476,10 +476,18 @@ class Registrar(object):
         # assert mahler.core.status.is_running(task, local=True)
         self._update_attribute('stderr', task, stderr)
 
-    def add_metric(self, task, metric_type, metric):
+    def add_metric(self, task, metric_type, metric, force=False):
         # TODO: Fetch host and PID and set
         # assert mahler.core.status.is_running(task, local=True)
-        self._update_attribute('metrics', task, {'type': metric_type, 'value': metric})
+        try:
+            self._update_attribute('metrics', task, {'type': metric_type, 'value': metric})
+
+        except RaceCondition:
+            if not force:
+                raise
+
+            task._metrics.refresh()
+            self.add_metric(task, metric_type, metric, force)
 
     def add_tags(self, task, tags, message=''):
         for tag in tags:
