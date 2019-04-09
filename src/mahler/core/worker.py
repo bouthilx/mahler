@@ -774,13 +774,15 @@ class Dispatcher(cotyledon.Service):
 
             try:
                 if exhaust_failures >= self.depletion_patience and not self.cached:
-                    print("Patience exhausted and no more task available. "
-                          "No more workers. Leaving now...")
+                    print("{} (UTC): Patience exhausted and no more task available. "
+                          "No more workers. Leaving now...".format(datetime.datetime.utcnow()))
                     raise SystemExit(0)
                 elif exhaust_failures >= self.depletion_patience:
-                    print("Patience exhausted and no more task available. "
-                          "Waiting for worker...")
-                    random_sleep(self.exhaust_wait_time * 10)
+                    print("{} (UTC): Patience exhausted and no more task available. "
+                          "Waiting for workers...".format(datetime.datetime.utcnow()))
+                    # Use queue to wait, but put back to process as usual. 
+                    task_id = self.completed.get(block=True)
+                    self.completed.put(task_id)
                     exhaust_failures -= 1
 
                 queued = False
