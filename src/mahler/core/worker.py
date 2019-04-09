@@ -304,7 +304,7 @@ def execute(registrar, state, task):
         status = mahler.core.status.Completed('')
 
     except mahler.core.utils.errors.SignalSuspend as e:
-        status = mahler.core.status.Suspended('Suspended remotely (status changed to Suspended)')
+        status = mahler.core.status.Suspended('luspended remotely (status changed to Suspended)')
         raise
 
     except mahler.core.utils.errors.SignalCancel as e:
@@ -434,6 +434,8 @@ def _main(worker_id, queued, completed, max_failedover_attempts=3):
 
         except mahler.core.utils.errors.SignalSuspend as e:
             print('Execution of task {} suspended'.format(task.id))
+            status = mahler.core.status.Suspended(str(e))
+            registrar.update_status(task, status)
             print('New status: {}'.format(task.status))
             continue
 
