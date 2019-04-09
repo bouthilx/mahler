@@ -62,25 +62,31 @@ class EventBasedAttribute(object):
 
         return int(self.last_item['inc_id'])
 
+    # TODO: Have an option to just fetch the last index instead of the whole history.
+    #       When just appending or just looking at last value, we don't need the whole thing.
     def refresh(self, full=False):
         if self.task._registrar:
             # self.history = self.task._registrar.retrieve_status(self.task)
             if full:
-                events = self.task._registrar._db.retrieve_events(
+                events = list(self.task._registrar._db.retrieve_events(
                     self.name, self.task,
-                    updated_after=str(self.history[-1]['id']) if self.history else None)
-                self.history += list(sorted(events, key=lambda event: event['id'].generation_time))
+                    updated_after=str(self.history[-1]['id']) if self.history else None))
+                self.history = list(sorted(self.history + events, key=lambda event: event['inc_id']))
+
 
                 if self.history:
                     self.last_item = self.history[-1]
             else:
                 events = list(self.task._registrar._db.retrieve_events(
                     self.name, self.task,
-                    limit=2, sort=[('_id', -1)],
+                    limit=3, sort=[('_id', -1)],
                     updated_after=str(self.last_item['id']) if self.last_item else None))
 
                 if events:
-                    self.last_item = events[0]
+                    self.last_item = list(sorted(
+                        events,
+                        key=lambda event: event['inc_id']))[-1]
+
 
     def append_event(self, event):
         if self.history or (not self.history and not self.last_item):

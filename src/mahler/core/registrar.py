@@ -336,7 +336,7 @@ class Registrar(object):
 
             heartbeat_frequency = task_document['registry']['heartbeat']
 
-            last_heartbeat = task._status.history[-1]['id'].generation_time
+            last_heartbeat = task._status.last_item['id'].generation_time
             now = datetime.datetime.now(datetime.timezone.utc)
             time_since_heartbeat = (now - last_heartbeat).total_seconds()
             if time_since_heartbeat < 2 * heartbeat_frequency:
