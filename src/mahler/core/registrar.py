@@ -404,15 +404,18 @@ class Registrar(object):
             task._container = task_document['registry']['container']
             yield task
 
-    def reserve(self, task, message="for execution"):
+    def reserve(self, task, message="for execution", current_status=None):
         """
         """
-        current_status = task.status
-        if not isinstance(current_status, mahler.core.status.Queued):
+        if current_status is None:
+            current_status = task.status
+        if not isinstance(current_status, (mahler.core.status.Queued, mahler.core.status.Reserved)):
             raise ValueError("Task with status {} cannot be reserved".format(current_status))
         self.update_status(task, mahler.core.status.Reserved(message), current_status)
 
+
         # TODO: Fetch host and PID and set
+        task._host.refresh()
         self._update_host(task)
 
     def _update_host(self, task):

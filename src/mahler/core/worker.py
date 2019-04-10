@@ -11,10 +11,11 @@ import os
 import pprint
 import queue
 import random
-import time
-import traceback
 import signal
 import sys
+import time
+import traceback
+import uuid
 import weakref
 
 import cotyledon
@@ -47,7 +48,8 @@ def random_sleep(sleep_time, min_time=1, var_time=None):
     if var_time is None:
         var_time = sleep_time * 0.1
     
-    time.sleep(max(min_time, random.gauss(sleep_time, var_time)))
+    if sleep_time > 0:
+        time.sleep(max(min_time, random.gauss(sleep_time, var_time)))
 
 
 def convert_h_size(resources):
@@ -345,13 +347,14 @@ def execute(registrar, state, task):
     return status
 
 
-def main(worker_id, queued, completed, working_dir=None, max_failedover_attempts=3):
+def main(hashcode, worker_id, queued, completed, working_dir=None, max_failedover_attempts=3):
 
     with tmp_directory(working_dir):
-        _main(worker_id, queued, completed, max_failedover_attempts=max_failedover_attempts)
+        _main(hashcode, worker_id, queued, completed,
+              max_failedover_attempts=max_failedover_attempts)
 
 
-def _main(worker_id, queued, completed, max_failedover_attempts=3):
+def _main(hashcode, worker_id, queued, completed, max_failedover_attempts=3):
     # TODO: Support config
 
     registrar = mahler.core.registrar.build()
@@ -360,7 +363,7 @@ def _main(worker_id, queued, completed, max_failedover_attempts=3):
     state = State()
 
     while True:
-        logger.info('Worker {} waiting for a task.'.format(worker_id))
+        print('Worker({}) waiting for a task.'.format(worker_id))
         task_id = queued.get(block=True)
         task = list(registrar.retrieve_tasks(id=task_id))[0]
 
@@ -369,13 +372,11 @@ def _main(worker_id, queued, completed, max_failedover_attempts=3):
             logger.warning('Task {} was executed on a different host: {}'.format(
                 task.id, task.host['env']['clustername']))
          
-        try:
-            registrar.reserve(task)
-        except (ValueError, mahler.core.registrar.RaceCondition) as e:
-            logger.info('Task {} reserved by concurrent worker'.format(task.id))
+        # Make sure the task is still reserved with proper hashcode.
+        if task.status.name != 'Reserved' or task.status.message != hashcode:
+            logger.info('Reservation lost for task {}'.format(task_id))
             completed.put(task_id)
             continue
-
 
         # set status of trial as running
         # Execute command from db
@@ -406,9 +407,7 @@ def _main(worker_id, queued, completed, max_failedover_attempts=3):
         #       {volume-name: {'file': file-like, 'object': object}}
 
         # TODO: Add heartbeat for reserved as well
-        print('Executing task: {}'.format(task.id))
-        assert task.status.name == 'Reserved'
-        
+        print('Worker({}) Executing task: {}'.format(worker_id, task.id))
         registrar.update_status(task, mahler.core.status.Running('start execution'))
         registrar.update_report(task.to_dict())
         try:
@@ -428,7 +427,7 @@ def _main(worker_id, queued, completed, max_failedover_attempts=3):
                 print('New status: {}'.format(new_status))
 
             print()
-            print('Now resuming worker {}...'.format(worker_id))
+            print('Now resuming Worker({})...'.format(worker_id))
             print()
 
             continue
@@ -571,7 +570,8 @@ class State(object):
 class Worker(cotyledon.Service):
     name = 'worker'
 
-    def __init__(self, worker_id, queued, completed, working_dir, max_failedover_attempts):
+    def __init__(self, worker_id, hashcode, queued, completed, working_dir, max_failedover_attempts):
+        self.hashcode = hashcode
         self.id = worker_id
         self.queued = queued
         self.completed = completed
@@ -580,7 +580,8 @@ class Worker(cotyledon.Service):
         self.max_failedover_attempts = max_failedover_attempts
 
     def run(self):
-        main(self.id, self.queued, self.completed, self.working_dir, self.max_failedover_attempts)
+        main(self.hashcode, self.id, self.queued, self.completed, self.working_dir,
+             self.max_failedover_attempts)
 
 
 class OldWorker(object):
@@ -615,9 +616,10 @@ class OldWorker(object):
 class Dispatcher(cotyledon.Service):
     name = 'dispatcher'
 
-    def __init__(self, worker_id, queued, completed, tags=tuple(), container=None, max_tasks=10e10,
+    def __init__(self, worker_id, hashcode, queued, completed, tags=tuple(), container=None, max_tasks=10e10,
                  depletion_patience=10, exhaust_wait_time=20):
-        self.worker_id = worker_id
+        self.hashcode = hashcode
+        self.id = worker_id
         self.running = []
         self.queued = queued
         self.completed = completed
@@ -633,6 +635,7 @@ class Dispatcher(cotyledon.Service):
         self.usage_buffer = 1.1
 
         self.tasks_completed = 0
+        self.shuffle = 0
 
     def get_task_available(self):
         projection = {'facility.resources': 1}  # TODO: Maybe we need more fields...
@@ -661,7 +664,10 @@ class Dispatcher(cotyledon.Service):
         # NOTE: Randomizing list to minimize conflicts, but still give higher priority to
         #       computationally expensive tasks.
         while n_tasks > 0:
-            index = min(random.randint(0, 5), n_tasks - 1)
+            if self.shuffle:
+                index = min(random.randint(0, self.shuffle), n_tasks - 1)
+            else:
+                index = 0
             yield sorted_tasks.pop(index)
             n_tasks -= 1
 
@@ -669,8 +675,40 @@ class Dispatcher(cotyledon.Service):
         self.cached[task.id] = task  # , self.compute_max_metric(task)
 
     def queue(self, task):
+        status = task.status
+        is_queued = status.name == 'Queued'
+        is_reserved = (status.name == 'Reserved' and
+                       str(status.message) == str(self.hashcode))
+        if not is_queued and not is_reserved:
+            return False
+
+        try:
+            self.registrar.reserve(task, message=self.hashcode, current_status=status)
+            logger.debug('Reserved {} with hash {}'.format(task.id, self.hashcode))
+        except mahler.core.utils.errors.RaceCondition as e:
+            return False
+
         self.cache(task)
         self.queued.put(task.id)
+        return True
+
+    def maintain(self):
+        trials = []
+        while not self.queued.empty():
+            try:
+                task_id = self.queued.get(timeout=0.01)
+            except queue.Empty:
+                break
+
+            task = self.cached.pop(task_id, None)
+            if task:
+                trials.append(task)
+
+        for trial in trials:
+            if self.queue(trial):
+                logger.info('Dispatcher({}) renewed task {} reservation'.format(self.id, trial.id))
+            else:
+                logger.info('Dispatcher({}) lost task {} reservation'.format(self.id, trial.id))
 
     def get_cached(self):
         while not self.completed.empty():
@@ -679,7 +717,7 @@ class Dispatcher(cotyledon.Service):
             except queue.Empty:
                 break
 
-            self.cached.pop(task_id)
+            self.cached.pop(task_id, None)
             self.tasks_completed += 1
 
         summed_resources = defaultdict(int)
@@ -772,6 +810,8 @@ class Dispatcher(cotyledon.Service):
 
         exhaust_failures = 0
         while self.tasks_completed < self.max_tasks:
+            
+            start_time = time.time()
 
             try:
                 if exhaust_failures >= self.depletion_patience and not self.cached:
@@ -789,18 +829,28 @@ class Dispatcher(cotyledon.Service):
                 queued = False
                 found_tasks = False
                 resources_available = self.get_resources_available()
-                logger.info('Attempting to fetch tasks')
+                print('Dispatcher({}) fetching new tasks to queue'.format(self.id))
                 logger.debug(pprint.pformat(convert_h_size(resources_available)))
                 for usage, task in self.get_task_available():
                     found_tasks = True 
                     exhaust_failures = 0
                     if not self.cached or self.have_enough(usage, resources_available):
-                        self.queue(task)
+                        if self.queue(task):
+                            self.shuffle = max(self.shuffle - 1, 0)
+                            print('Dispatcher({}) decrease shuffling to {}'.format(
+                                self.id, self.shuffle))
+                        else:
+                            self.shuffle += 1
+                            print('Dispatcher({}) increase shuffling to {}'.format(
+                                self.id, self.shuffle))
+                            continue
+
                         queued = True
+
                         resources_available = self.increase_usage(resources_available, usage)
-                        logger.info('Queued task {}.'.format(task.id))
+                        print('Dispatcher({}) task {} reserved and queued'.format(self.id, task.id))
                         logger.debug(pprint.pformat(convert_h_size(resources_available)))
-                        random_sleep(5, min_time=1, var_time=2)
+                        # random_sleep(5, min_time=1, var_time=2)
 
                 if not found_tasks:
                     logger.info('Dispatcher could not pick any task for execution.')
@@ -810,7 +860,6 @@ class Dispatcher(cotyledon.Service):
                           "trying again. {} attemps remaining.".format(
                               datetime.datetime.utcnow(), self.exhaust_wait_time,
                               self.depletion_patience - exhaust_failures))
-                    random_sleep(self.exhaust_wait_time)
                 elif not queued:
                     print()
                     print("Waiting for free resources to queue additional tasks.")
@@ -825,7 +874,10 @@ class Dispatcher(cotyledon.Service):
                     print()
                     sys.stdout.flush()
                     sys.stderr.flush()
-                    random_sleep(60, min_time=30, var_time=10)
+
+                random_sleep(mahler.core.config.heartbeat - (time.time() - start_time))
+                print('Dispatcher({}) maintaining reservations'.format(self.id))
+                self.maintain()
 
             except KeyboardInterrupt as e:
                 try:
@@ -856,9 +908,14 @@ class Manager(cotyledon.ServiceManager):
         data_manager = multiprocessing.Manager()
         queued = data_manager.Queue()
         completed = data_manager.Queue()
-        dispatcher = self.add(Dispatcher, args=(queued, completed, tags, container, max_tasks,
-                                                depletion_patience, exhaust_wait_time))
-        self.add(Worker, args=(queued, completed, working_dir, max_failedover_attempts), workers=5)
+        # TODO: Make a hash here passed to workers
+        self.hashcode = uuid.uuid4().hex
+        print(self.hashcode)
+        dispatcher = self.add(Dispatcher, args=(self.hashcode, queued, completed, tags, container,
+                                                max_tasks, depletion_patience, exhaust_wait_time))
+        self.add(Worker, args=(self.hashcode, queued, completed, working_dir,
+                               max_failedover_attempts),
+                 workers=6)
 
         self.max_failedover_attempts = 5
 
