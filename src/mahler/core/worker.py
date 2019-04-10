@@ -915,7 +915,7 @@ class Manager(cotyledon.ServiceManager):
                                                 max_tasks, depletion_patience, exhaust_wait_time))
         self.add(Worker, args=(self.hashcode, queued, completed, working_dir,
                                max_failedover_attempts),
-                 workers=6)
+                 workers=4)
 
         self.max_failedover_attempts = 5
 
