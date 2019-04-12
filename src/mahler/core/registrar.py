@@ -488,8 +488,10 @@ class Registrar(object):
         except RaceCondition:
             if not force:
                 raise
-
+            
+            print('RaceCondition to log metric of type {}'.format(metric_type))
             task._metrics.refresh()
+            print(task._metrics.last_item)
             self.add_metric(task, metric_type, metric, force)
 
     def add_tags(self, task, tags, message=''):
