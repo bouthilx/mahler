@@ -104,8 +104,6 @@ class Client(object):
 
     def resume(self, task, message):
         try:
-            return self._update_status(task, mahler.core.status.Queued(message))
-        except ValueError:
             return self._update_status(task, mahler.core.status.OnHold(message))
         except BaseException as e:
             print(type(e), str(e))
