@@ -257,12 +257,13 @@ class Registrar(object):
         for task_document in task_iterator:
             task = Task(op=None, arguments=None, id=task_document['id'],
                         name=None, registrar=self)
-            if task.status.name != onhold_status.name:
+            status = task.status
+            if status.name != onhold_status.name:
                 # Report is outdated, leave it to maintain_report to update it.
                 continue
 
-            if (not task.output and
-                all(message_snipet not in task.status.message for message_snipet in TMP_BROKEN)):
+            if (not task.output and 
+                all(message_snipet not in status.message for message_snipet in TMP_BROKEN)):
                 continue
 
             try:

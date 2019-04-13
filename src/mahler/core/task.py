@@ -5,12 +5,20 @@ import logging
 import os
 import sys
 
+from flask import Flask
+from flask_caching import Cache
+
 from mahler.core.attributes import EventBasedItemAttribute, EventBasedListAttribute
 from mahler.core import config
 import mahler.core.status
 
 
 logger = logging.getLogger('mahler.core.task')
+
+
+app = Flask(__name__)
+# Check Configuring Flask-Cache section for more details
+cache = Cache(app, config={'CACHE_TYPE': 'simple'})
 
 
 # Must differentiate tasks
@@ -200,13 +208,14 @@ class Task(object):
 
     @property
     def started_on(self):
-        if not self._status.value:
+        events = self._status.events 
+        if not events:
             return None
 
         # TODO: Support interruption, that means there may me other status between runnings
         found_running = False
         started_on = None
-        for i, event in enumerate(self._status.history[::-1]):
+        for i, event in enumerate(events[::-1]):
             found_running = found_running or event['item']['name'] == 'Running'
 
             if found_running and event['item']['name'] != 'Running':
@@ -258,22 +267,23 @@ class Task(object):
         return self._status.last_item['id'].generation_time
 
     @property
+    @cache.memoize(timeout=60)
     def status(self):
-        # TODO: This may create mismatch between status and ID if there is a refresh
-        #       between self._status.value and self._status.last_id
-        if not self._status.value:
+        value = self._status.value
+        if not value:
             return None
 
-        status = mahler.core.status.build(**self._status.value)
-        status.id = self._status.last_id
+        status = mahler.core.status.build(**value)
+        status.id = self._status.last_item['inc_id']
         return status
 
     @property
     def host(self):
-        if not self._host.value:
+        value = self._host.value
+        if not value:
             return {}
 
-        return copy.deepcopy(self._host.value)
+        return copy.deepcopy(value)
 
     @property
     def tags(self):
@@ -287,8 +297,8 @@ class Task(object):
     def stderr(self):
         return "".join(self._stderr.value)
 
-    # TODO: Add a caching mechanism.
     @property
+    @cache.memoize(timeout=60)
     def metrics(self):
         # TODO: Organize by types, and sort by creation time.
         #       Make it be defaultdict(list) so that unavailable metrics can be considered as

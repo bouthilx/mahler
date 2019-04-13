@@ -177,13 +177,13 @@ def heartbeat(registrar, task, slept):
     # TODO: Replace this with observers on database
     #       ex: tailable cursors in MongoDB
     #       https://docs.mongodb.com/manual/core/tailable-cursors/
-    new_status = task.status
-    if new_status.name == 'Suspended':
-        raise mahler.core.utils.errors.SignalSuspend(
-                'Task suspended remotely: {}'.format(new_status.message))
-    elif task.status.name == 'Cancelled':
-        raise mahler.core.utils.errors.SignalCancel(
-                'Task cancelled remotely: {}'.format(new_status.message))
+    # new_status = task.status
+    # if new_status.name == 'Suspended':
+    #     raise mahler.core.utils.errors.SignalSuspend(
+    #             'Task suspended remotely: {}'.format(new_status.message))
+    # elif task.status.name == 'Cancelled':
+    #     raise mahler.core.utils.errors.SignalCancel(
+    #             'Task cancelled remotely: {}'.format(new_status.message))
 
     if slept < task.heartbeat:
         return False
@@ -307,7 +307,7 @@ def execute(registrar, state, task):
         status = mahler.core.status.Completed('')
 
     except mahler.core.utils.errors.SignalSuspend as e:
-        status = mahler.core.status.Suspended('luspended remotely (status changed to Suspended)')
+        status = mahler.core.status.Suspended('Suspended remotely (status changed to Suspended)')
         raise
 
     except mahler.core.utils.errors.SignalCancel as e:
@@ -436,12 +436,12 @@ def _main(hashcode, worker_id, queued, completed, max_failedover_attempts=3):
             print('Execution of task {} suspended'.format(task.id))
             status = mahler.core.status.Suspended(str(e))
             registrar.update_status(task, status)
-            print('New status: {}'.format(task.status))
+            print('New status: {}'.format(status))
             continue
 
         except mahler.core.utils.errors.SignalCancel as e:
             print('Execution of task {} cancelled'.format(task.id))
-            print('New status: {}'.format(task.status))
+            print('New status: {}'.format(status))
             continue
 
         except mahler.core.utils.errors.SignalInterruptWorker as e:
@@ -470,7 +470,7 @@ def _main(hashcode, worker_id, queued, completed, max_failedover_attempts=3):
             print('Execution of task {} crashed'.format(task.id))
 
             broke_n_times = sum(int(event['item']['name'] == new_status.name)
-                                for event in task._status.history)
+                                for event in task._status.events)
             if broke_n_times < max_failedover_attempts:
                 new_status = mahler.core.status.FailedOver('Broke {} times'.format(broke_n_times))
                 registrar.update_status(task, new_status)
