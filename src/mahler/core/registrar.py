@@ -336,7 +336,9 @@ class Registrar(object):
                 continue
 
             heartbeat_frequency = task_document['registry']['heartbeat']
-
+        
+            # TODO: Why the hell would we need this???
+            task._status.refresh(full=False)
             last_heartbeat = task._status.last_item['id'].generation_time
             now = datetime.datetime.now(datetime.timezone.utc)
             time_since_heartbeat = (now - last_heartbeat).total_seconds()
@@ -490,9 +492,7 @@ class Registrar(object):
             if not force:
                 raise
             
-            print('RaceCondition to log metric of type {}'.format(metric_type))
             task._metrics.refresh()
-            print(task._metrics.last_item)
             self.add_metric(task, metric_type, metric, force)
 
     def add_tags(self, task, tags, message=''):
