@@ -71,8 +71,11 @@ class EventBasedAttribute(object):
                 events = list(self.task._registrar._db.retrieve_events(
                     self.name, self.task,
                     updated_after=str(self.history[-1]['id']) if self.history else None))
-                self.history = list(sorted(self.history + events, key=lambda event: event['inc_id']))
-
+                inc_ids = set(event['inc_id'] for event in self.history)
+                for event in events:
+                    if event['inc_id'] not in inc_ids:
+                        self.history.append(event)
+                self.history = list(sorted(self.history, key=lambda event: event['inc_id']))
 
                 if self.history:
                     self.last_item = self.history[-1]
