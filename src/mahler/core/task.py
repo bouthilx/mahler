@@ -266,9 +266,7 @@ class Task(object):
 
         return self._status.last_item['id'].generation_time
 
-    @property
-    @cache.memoize(timeout=60)
-    def status(self):
+    def get_recent_status(self):
         value = self._status.value
         if not value:
             return None
@@ -276,6 +274,11 @@ class Task(object):
         status = mahler.core.status.build(**value)
         status.id = self._status.last_item['inc_id']
         return status
+
+    @property
+    @cache.memoize(timeout=60)
+    def status(self):
+        return self.get_recent_status()
 
     @property
     def host(self):

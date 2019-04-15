@@ -164,7 +164,7 @@ class Registrar(object):
             if time_since_update < MIN_TIME_WAITING:
                 return False
 
-            return ((task.status.name != task_document['registry']['status']) or
+            return ((task.get_recent_status().name != task_document['registry']['status']) or
                     (set(task.tags) != set(task_document['registry']['tags'])) or
                     (task_document['output'] != task.output))
 

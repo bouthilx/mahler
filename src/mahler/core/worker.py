@@ -191,7 +191,7 @@ def heartbeat(registrar, task, slept):
     try:
         registrar.update_status(task, mahler.core.status.Running('heartbeat'))
     except mahler.core.utils.errors.RaceCondition as e:
-        new_status = task.status
+        new_status = task.get_recent_status()
         if isinstance(new_status, mahler.core.status.Suspended):
             raise mahler.core.utils.errors.SignalSuspend(
                 'Task suspended remotely: {}'.format(new_status.message))
@@ -373,7 +373,8 @@ def _main(hashcode, worker_id, queued, completed, max_failedover_attempts=3):
                 task.id, task.host['env']['clustername']))
          
         # Make sure the task is still reserved with proper hashcode.
-        if task.status.name != 'Reserved' or task.status.message != hashcode:
+        status = task.get_recent_status()
+        if status.name != 'Reserved' or status.message != hashcode:
             logger.info('Reservation lost for task {}'.format(task_id))
             completed.put(task_id)
             continue
@@ -421,7 +422,8 @@ def _main(hashcode, worker_id, queued, completed, max_failedover_attempts=3):
                 raise SystemExit()
             finally:
                 new_status = mahler.core.status.Suspended('Suspended by user (KeyboardInterrupt)')
-                assert task.status.name == 'Running'
+                status = task.get_recent_status()
+                assert status.name == 'Running', status.name
                 registrar.update_status(task, new_status)
                 print('Execution of task {} interrupted'.format(task.id))
                 print('New status: {}'.format(new_status))
@@ -434,19 +436,25 @@ def _main(hashcode, worker_id, queued, completed, max_failedover_attempts=3):
 
         except mahler.core.utils.errors.SignalSuspend as e:
             print('Execution of task {} suspended'.format(task.id))
-            status = mahler.core.status.Suspended(str(e))
-            registrar.update_status(task, status)
+            status = task.get_recent_status()
+            if status.name != 'Suspended':
+                assert status.name == 'Running', status.name
+                status = mahler.core.status.Suspended(str(e))
+                registrar.update_status(task, status)
             print('New status: {}'.format(status))
             continue
 
         except mahler.core.utils.errors.SignalCancel as e:
             print('Execution of task {} cancelled'.format(task.id))
+            status = task.get_recent_status()
+            assert status.name == 'Suspended', status.name
             print('New status: {}'.format(status))
             continue
 
         except mahler.core.utils.errors.SignalInterruptWorker as e:
             new_status = mahler.core.status.Interrupted(str(e))
-            assert task.status.name == 'Running'
+            status = task.get_recent_status()
+            assert status.name == 'Running', status.name
             registrar.update_status(task, new_status)
             print('Execution of task {} interrupted'.format(task.id))
             print('New status: {}'.format(new_status))
@@ -455,7 +463,8 @@ def _main(hashcode, worker_id, queued, completed, max_failedover_attempts=3):
 
         except mahler.core.utils.errors.SignalInterruptTask as e:
             new_status = mahler.core.status.Interrupted(str(e))
-            assert task.status.name == 'Running'
+            status = task.get_recent_status()
+            assert status.name == 'Running', status.name
             registrar.update_status(task, new_status)
             print('Execution of task {} interrupted'.format(task.id))
             print('New status: {}'.format(new_status))
@@ -465,15 +474,19 @@ def _main(hashcode, worker_id, queued, completed, max_failedover_attempts=3):
         except mahler.core.utils.errors.ExecutionError as e:
 
             new_status = mahler.core.status.Broken(str(e))
-            assert task.status.name == 'Running'
-            registrar.update_status(task, new_status)
-            print('Execution of task {} crashed'.format(task.id))
-
-            broke_n_times = sum(int(event['item']['name'] == new_status.name)
-                                for event in task._status.events)
-            if broke_n_times < max_failedover_attempts:
-                new_status = mahler.core.status.FailedOver('Broke {} times'.format(broke_n_times))
+            status = task.get_recent_status()
+            if status.name == 'Running':
                 registrar.update_status(task, new_status)
+                print('Execution of task {} crashed'.format(task.id))
+
+                broke_n_times = sum(int(event['item']['name'] == new_status.name)
+                                    for event in task._status.events)
+                if broke_n_times < max_failedover_attempts:
+                    message = 'broke {} times'.format(broke_n_times)
+                    new_status = mahler.core.status.FailedOver(message)
+                    registrar.update_status(task, new_status)
+            else:
+                print('Forced status change cause interruption if execution.')
 
             print('New status: {}'.format(new_status))
 
@@ -488,7 +501,8 @@ def _main(hashcode, worker_id, queued, completed, max_failedover_attempts=3):
             raise e.__class__(message) from e
 
         else:
-            assert task.status.name == 'Running'
+            status = task.get_recent_status()
+            assert status.name == 'Running', status.name
             registrar.update_status(task, new_status)
             print('Execution of task {} stopped'.format(task.id))
             print('New status: {}'.format(new_status))
