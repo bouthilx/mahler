@@ -220,8 +220,9 @@ def run(registrar, task, state, stdout, stderr):
     data = manager.dict()
     volume = manager.dict()
 
+    task_thread = TaskProcess(task.get_offline(), state, stdout, stderr, data, volume)
+
     try:
-        task_thread = TaskProcess(task.get_offline(), state, stdout, stderr, data, volume)
         task_thread.start()
 
         usage_monitor = ResourceUsageMonitor(task_thread.pid)
@@ -707,7 +708,7 @@ class Dispatcher(cotyledon.Service):
         return True
 
     def maintain(self):
-        trials = []
+        tasks = []
         while not self.queued.empty():
             try:
                 task_id = self.queued.get(timeout=0.01)
@@ -716,13 +717,22 @@ class Dispatcher(cotyledon.Service):
 
             task = self.cached.pop(task_id, None)
             if task:
-                trials.append(task)
+                tasks.append(task)
 
-        for trial in trials:
-            if self.queue(trial):
-                logger.info('Dispatcher({}) renewed task {} reservation'.format(self.id, trial.id))
+        for task_id in list(self.cached.keys()):
+            task = self.cached.pop(task_id)
+            status = task.get_recent_status()
+            if status.name != 'Running':
+                logger.info('Dispatcher({}) detected task {} lost by a worker: {}'.format(
+                    self.id, task.id, status))
             else:
-                logger.info('Dispatcher({}) lost task {} reservation'.format(self.id, trial.id))
+                self.cached[task_id] = task
+
+        for task in tasks:
+            if self.queue(task):
+                logger.info('Dispatcher({}) renewed task {} reservation'.format(self.id, task.id))
+            else:
+                logger.info('Dispatcher({}) lost task {} reservation'.format(self.id, task.id))
 
     def get_cached(self):
         while not self.completed.empty():
@@ -824,7 +834,6 @@ class Dispatcher(cotyledon.Service):
 
         exhaust_failures = 0
         while self.tasks_completed < self.max_tasks:
-            
             start_time = time.time()
 
             try:
@@ -874,25 +883,40 @@ class Dispatcher(cotyledon.Service):
                           "trying again. {} attemps remaining.".format(
                               datetime.datetime.utcnow(), self.exhaust_wait_time,
                               self.depletion_patience - exhaust_failures))
+
                 elif not queued:
                     print()
                     print("Waiting for free resources to queue additional tasks.")
-                    print()
-                    print('Available resources:')
-                    pprint.pprint(convert_h_size(resources_available))
-                    print()
-                    print('Resources usage estimation:')
-                    for task in self.cached.values():
-                        print('Task {}: {}'.format(task.id, ' '.join(sorted(task.tags))))
-                        pprint.pprint(convert_h_size(self.compute_max_metric(task)))
-                    print()
-                    sys.stdout.flush()
-                    sys.stderr.flush()
 
-                random_sleep(mahler.core.config.heartbeat - (time.time() - start_time))
-                print('Dispatcher({}) maintaining reservations'.format(self.id))
-                self.maintain()
+                print()
+                print('Available resources:')
+                pprint.pprint(convert_h_size(resources_available))
+                print()
+                print('Resources usage estimation:')
+                for task in self.cached.values():
+                    print('Task {}: {}'.format(task.id, ' '.join(sorted(task.tags))))
+                    pprint.pprint(convert_h_size(self.compute_max_metric(task)))
+                print()
+                sys.stdout.flush()
+                sys.stderr.flush()
 
+                completed = False
+                while time.time() - start_time < mahler.core.config.heartbeat:
+                    time.sleep(1)
+                    try:
+                        task_id = self.completed.get(timeout=0.01)
+                        self.completed.put(task_id)
+                        completed = True
+                        print('Dispatcher({}) breaking out of sleep'.format(self.id))
+                    except queue.Empty:
+                        continue
+                    else:
+                        break
+
+                if not completed:
+                    print('Dispatcher({}) maintaining reservations'.format(self.id))
+                    self.maintain()
+                
             except KeyboardInterrupt as e:
                 try:
                     print('')
