@@ -421,7 +421,7 @@ class Task(object):
             # reported_on is set at registration based on snapshot-event id
             # report_document['registry']['reported_on'] = datetime.datetime.utcnow()
             report_document['registry']['duration'] = self.duration
-            report_document['registry']['status'] = self.status.name
+            report_document['registry']['status'] = self.get_recent_status().name
             report_document['registry']['tags'] = self.tags
 
             report_document['facility']['host'] = self.host
