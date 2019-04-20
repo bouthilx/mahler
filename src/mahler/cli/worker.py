@@ -26,6 +26,11 @@ def build(parser):
         '--container', help='container used to execute the worker')
 
     execute_parser.add_argument(
+        '--num-workers', type=int,
+        help=('number of workers to spawn. Default: number of avail cpus '
+              '(taking into account slurm resource assignement when relevant)'))
+
+    execute_parser.add_argument(
         '--working-dir', help='Working directory')
 
     execute_parser.add_argument(

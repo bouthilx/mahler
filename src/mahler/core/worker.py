@@ -941,19 +941,22 @@ class Dispatcher(cotyledon.Service):
 class Manager(cotyledon.ServiceManager):
     def __init__(self, tags, container, max_tasks,
                  depletion_patience, exhaust_wait_time, 
-                 working_dir, max_failedover_attempts):
+                 working_dir, max_failedover_attempts, num_workers):
         super(Manager, self).__init__()
         data_manager = multiprocessing.Manager()
         queued = data_manager.Queue()
         completed = data_manager.Queue()
         # TODO: Make a hash here passed to workers
         self.hashcode = uuid.uuid4().hex
-        print(self.hashcode)
+
+        if num_workers is None:
+            num_workers = os.environ.get('SLURM_CPUS_PER_NODE', psutil.cpu_count())
+
         dispatcher = self.add(Dispatcher, args=(self.hashcode, queued, completed, tags, container,
                                                 max_tasks, depletion_patience, exhaust_wait_time))
         self.add(Worker, args=(self.hashcode, queued, completed, working_dir,
                                max_failedover_attempts),
-                 workers=4)
+                 workers=num_workers)
 
         self.max_failedover_attempts = 5
 
@@ -972,7 +975,8 @@ class Manager(cotyledon.ServiceManager):
 
 def start(tags=tuple(), container=None, max_tasks=10e10,
           depletion_patience=10, exhaust_wait_time=20, working_dir=None, max_failedover_attempts=3,
-          debug=False):
+          debug=False, num_workers=None):
+
 
     # data_manager = multiprocessing.Manager()
     # queued = data_manager.Queue()
@@ -982,4 +986,5 @@ def start(tags=tuple(), container=None, max_tasks=10e10,
 
     Manager(tags=tags, container=container, max_tasks=max_tasks,
             depletion_patience=depletion_patience, exhaust_wait_time=exhaust_wait_time, 
-            working_dir=working_dir, max_failedover_attempts=max_failedover_attempts).run()
+            working_dir=working_dir, max_failedover_attempts=max_failedover_attempts,
+            num_workers=num_workers).run()
