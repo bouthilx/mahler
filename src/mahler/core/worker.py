@@ -9,6 +9,7 @@ import multiprocessing
 import multiprocessing.managers
 import os
 import pprint
+import psutil
 import queue
 import random
 import signal
@@ -23,7 +24,8 @@ import cotyledon
 from hurry.filesize import size as print_h_size
 
 from mahler.core.utils.std import stdredirect
-from mahler.core.utils.host import fetch_host_name, get_gpu_usage, ResourceUsageMonitor
+from mahler.core.utils.host import (
+    fetch_host_name, get_cpu_usage, get_gpu_usage, get_max_usage, ResourceUsageMonitor)
 import mahler.core.registrar
 import mahler.core.utils.errors
 from mahler.core.utils.flatten import flatten
@@ -753,12 +755,18 @@ class Dispatcher(cotyledon.Service):
         return summed_resources
 
     def get_resources_available(self):
-        usage = get_gpu_usage()
-        # We assume we are alone on the gpu
+        gpu_usage = get_gpu_usage()
+
+        # We assume we are alone on the gpu (if there is one) and all resources are reserved for the
+        # mahler worker. This may be true way deployed on clusters, but not when running locally.
         avail = flatten({
             'gpu': {
-                'memory': usage['memory']['total'],
-                'util': 100}})  # - usage['util']}})
+                'memory': gpu_usage.get('memory', {}).get('total', 0),
+                'util': 100 if gpu_usage else 0},
+            'cpu': {
+                'memory': os.environ.get('SLURM_MEM_PER_NODE', psutil.virtual_memory().total),
+                'util': 100 * os.environ.get('SLURM_CPUS_PER_NODE', psutil.cpu_count()),
+                }})
 
         cached = self.get_cached()
 
@@ -768,7 +776,7 @@ class Dispatcher(cotyledon.Service):
             avail[name] -= value
 
         # TODO: test this for cases where estimation is to optimistic.
-        avail['gpu.util'] = min(avail['gpu.util'], 100 - usage['util'])
+        # avail['gpu.util'] = min(avail['gpu.util'], 100 - usage['util'])
 
         return avail
 
@@ -778,41 +786,18 @@ class Dispatcher(cotyledon.Service):
         #       If no hints given by user in resources.usage, then assume the worst.
         #       This will limit crashes and we can recover efficiency when enough 
         #       metrics have been accumulated.
-        WORST_GPU_MEMORY_USAGE = 10 * 2 ** 30  # 10GB
-        WORST_GPU_UTIL = 60  # 90 %
-        stats = {}
+        stats = {
+            'gpu.memory': 10 * 2 ** 30 if 'gpu' in task.resources else 0,  # 10GB
+            'gpu.util': 60 if 'gpu' in task.resources else 0,
+            'cpu.memory': 10 * 2 ** 30,  # 10GB
+            'cpu.util': 100}
+
         if len(task.metrics['usage']) < 2:
-            resources = flatten(task.resources)
-            stats['gpu'] = {
-                'memory': resources.get('usage.gpu.memory', WORST_GPU_MEMORY_USAGE),
-                'util': resources.get('usage.gpu.util', WORST_GPU_UTIL)}
-            # task.resources['usage']['cpu']['total']['cpu_percent']
-            # task.resources['usage']['cpu']['total']['mem']
+            stats.update(flatten(task.resources.get('usage')))
         else:
-            memory = 0
-            total_mem_used = 0
-            util = 0
-            for usage in task.metrics['usage']:
-                if usage['gpu']['memory']['process']['max'] > memory:
-                    memory = usage['gpu']['memory']['process']['max']
-                    total_mem_used = usage['gpu']['memory']['used']['max']
-                    # We use mean for util because reaching 100 is not critical.
-                    # Well... it is simply impossible.
-                    util = usage['gpu']['util']['mean']
+            stats.update(get_max_usage(task.metrics['usage']))
 
-            if total_mem_used == 0.:
-                util = 0
-            else:
-                util = int(memory / total_mem_used * util + 0.5)
-
-            stats['gpu'] = {
-                'memory': memory,
-                'util': util}
-
-            # TODO: Include cpu stats for dispatching decisions.
-
-        stats = flatten(stats)
-
+        # stats = flatten(stats)
         logger.debug('Expected usage for task {}:\n{}'.format(
             task.id, pprint.pformat(convert_h_size(stats))))
 
@@ -827,6 +812,14 @@ class Dispatcher(cotyledon.Service):
             summed_resources[name] -= value
 
         return summed_resources
+
+    def sum_usage(self, usages):
+        total_usage = {}
+        for usage in usages:
+            for name, value in usage.items():
+                total_usage[name] = total_usage.get(name, 0) + value
+
+        return total_usage
 
     def run(self):
 
@@ -893,6 +886,12 @@ class Dispatcher(cotyledon.Service):
                 pprint.pprint(convert_h_size(resources_available))
                 print()
                 print('Resources usage estimation:')
+                print('Total')
+                pprint.pprint(convert_h_size(
+                    self.sum_usage(
+                        self.compute_max_metric(task) for task in self.cached.values())))
+                print()
+                print('Per task')
                 for task in self.cached.values():
                     print('Task {}: {}'.format(task.id, ' '.join(sorted(task.tags))))
                     pprint.pprint(convert_h_size(self.compute_max_metric(task)))

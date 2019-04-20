@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 
 def fetch_host_name():
-    return os.environ['CLUSTERNAME']
+    return os.environ.get('CLUSTERNAME', 'local')
 
 
 def fetch_host_info():
@@ -191,6 +191,29 @@ def get_cpu_usage(pid):
             'cpu_nums': list(cpu_nums)}}
 
     return process_stats
+
+
+def get_max_usage(metrics):
+    cores_avail = os.environ.get('SLURM_CPUS_PER_NODE', psutil.cpu_count())
+
+    stats = {}
+    for usage in metrics:
+        if usage['gpu'] and usage['gpu']['memory']['process']['max'] > stats.get('gpu.memory', -1):
+            memory = stats['gpu.memory'] = usage['gpu']['memory']['process']['max']
+            total_mem_used = usage['gpu']['memory']['used']['max']
+            # We use mean for util because reaching 100 is not critical.
+            # Well... it is simply impossible.
+            if total_mem_used:
+                stats['gpu.util'] = int(memory / total_mem_used *
+                                        usage['gpu']['util']['mean'] + 0.5)
+            else:
+                stats['gpu.util'] = 0
+
+        stats['cpu.memory'] = max(stats.get('cpu.memory', 0), usage['cpu']['total']['mem']['max'])
+        cpu_util = int(usage['cpu']['total']['cpu_percent']['max'] / cores_avail * 100 + 0.5)
+        stats['cpu.util'] = max(stats.get('cpu.util', 0), cpu_util)
+
+    return stats
 
 
 def get_gpu_usage(pid=None):
