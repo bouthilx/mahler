@@ -60,7 +60,11 @@ def convert_h_size(resources):
         if key.endswith('util'):
             d[key] = '{} %'.format(value)
         else:
-            d[key] = print_h_size(value)
+            try:
+                d[key] = print_h_size(value)
+            except Exception as e:
+                logger.error(str(e))
+                logger.error(resources)
     
     return d
 
