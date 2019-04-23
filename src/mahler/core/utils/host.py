@@ -64,7 +64,7 @@ def fetch_platform_info():
             try:
                 bson.BSON.encode(dict(a=item))
             except bson.errors.InvalidDocument as e:
-                if "Cannot encode" not in str(e):
+                if "cannot encode" not in str(e).lower():
                     raise
             else:
                 platform_info[key] = item
