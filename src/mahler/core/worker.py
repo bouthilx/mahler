@@ -763,13 +763,18 @@ class Dispatcher(cotyledon.Service):
 
         # We assume we are alone on the gpu (if there is one) and all resources are reserved for the
         # mahler worker. This may be true way deployed on clusters, but not when running locally.
+        if 'SLURM_MEM_PER_NODE' in os.environ:
+            cpu_memory = int(os.environ['SLURM_MEM_PER_NODE']) * 125000  # Convert to bytes
+        else:
+            cpu_memory = psutil.virtual_memory().total
+
         avail = flatten({
             'gpu': {
                 'memory': gpu_usage.get('memory', {}).get('total', 0),
                 'util': 100 if gpu_usage else 0},
             'cpu': {
-                'memory': os.environ.get('SLURM_MEM_PER_NODE', psutil.virtual_memory().total),
-                'util': 100 * os.environ.get('SLURM_CPUS_PER_NODE', psutil.cpu_count()),
+                'memory': cpu_memory,
+                'util': 100 * int(os.environ.get('SLURM_JOB_CPUS_PER_NODE', psutil.cpu_count())),
                 }})
 
         cached = self.get_cached()
@@ -943,7 +948,7 @@ class Dispatcher(cotyledon.Service):
 
 class Manager(cotyledon.ServiceManager):
     def __init__(self, tags, container, max_tasks,
-                 depletion_patience, exhaust_wait_time, 
+                 depletion_patience, exhaust_wait_time,
                  working_dir, max_failedover_attempts, num_workers):
         super(Manager, self).__init__()
         data_manager = multiprocessing.Manager()
@@ -953,7 +958,7 @@ class Manager(cotyledon.ServiceManager):
         self.hashcode = uuid.uuid4().hex
 
         if num_workers is None:
-            num_workers = os.environ.get('SLURM_CPUS_PER_NODE', psutil.cpu_count())
+            num_workers = int(os.environ.get('SLURM_JOB_CPUS_PER_NODE', psutil.cpu_count()))
 
         dispatcher = self.add(Dispatcher, args=(self.hashcode, queued, completed, tags, container,
                                                 max_tasks, depletion_patience, exhaust_wait_time))
