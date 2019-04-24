@@ -764,7 +764,7 @@ class Dispatcher(cotyledon.Service):
         # We assume we are alone on the gpu (if there is one) and all resources are reserved for the
         # mahler worker. This may be true way deployed on clusters, but not when running locally.
         if 'SLURM_MEM_PER_NODE' in os.environ:
-            cpu_memory = int(os.environ['SLURM_MEM_PER_NODE']) * 125000  # Convert to bytes
+            cpu_memory = int(os.environ['SLURM_MEM_PER_NODE']) * 2 ** 20  # Convert to bytes
         else:
             cpu_memory = psutil.virtual_memory().total
 
@@ -959,6 +959,8 @@ class Manager(cotyledon.ServiceManager):
 
         if num_workers is None:
             num_workers = int(os.environ.get('SLURM_JOB_CPUS_PER_NODE', psutil.cpu_count()))
+
+        print('Deploying {} workers'.format(num_workers))
 
         dispatcher = self.add(Dispatcher, args=(self.hashcode, queued, completed, tags, container,
                                                 max_tasks, depletion_patience, exhaust_wait_time))
