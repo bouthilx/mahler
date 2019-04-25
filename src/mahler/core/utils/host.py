@@ -210,7 +210,8 @@ def get_max_usage(metrics):
                 stats['gpu.util'] = 0
 
         stats['cpu.memory'] = max(stats.get('cpu.memory', 0), usage['cpu']['total']['mem']['max'])
-        cpu_util = int(usage['cpu']['total']['cpu_percent']['max'] / cores_avail * 100 + 0.5)
+        # cpu_util = int(usage['cpu']['total']['cpu_percent']['max'] / cores_avail * 100 + 0.5)
+        cpu_util = usage['cpu']['total']['cpu_percent']['max']
         stats['cpu.util'] = max(stats.get('cpu.util', 0), cpu_util)
 
     return stats
