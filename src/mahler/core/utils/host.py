@@ -161,14 +161,19 @@ def get_cpu_usage(pid):
             mem = process.memory_full_info().uss
             cpu_percent = process.cpu_percent()
             cpu_num = process.cpu_num()
-    except psutil._exceptions.NoSuchProcess:
+    except psutil.NoSuchProcess:
         return {str(pid): {}}
 
     children = {}
     total_cpu_percent = cpu_percent
     total_mem = mem
     cpu_nums = set([cpu_num])
-    for child in process.children(recursive=False):
+    try:
+        children_process = process.children(recursive=False)
+    except psutil.NoSuchProcess:
+        children_process = []
+
+    for child in children_process:
         child_stats = get_cpu_usage(child.pid)
         child_pid = str(child.pid)
         if not child_stats[child_pid]:
