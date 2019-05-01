@@ -637,10 +637,11 @@ class OldWorker(object):
 class Dispatcher(cotyledon.Service):
     name = 'dispatcher'
 
-    def __init__(self, worker_id, hashcode, queued, completed, tags=tuple(), container=None, max_tasks=10e10,
+    def __init__(self, worker_id, hashcode, queued, completed, num_workers, tags=tuple(), container=None, max_tasks=10e10,
                  depletion_patience=10, exhaust_wait_time=20):
         self.hashcode = hashcode
         self.id = worker_id
+        self.num_workers = num_workers
         self.running = []
         self.queued = queued
         self.completed = completed
@@ -877,6 +878,9 @@ class Dispatcher(cotyledon.Service):
                         logger.debug(pprint.pformat(convert_h_size(resources_available)))
                         # random_sleep(5, min_time=1, var_time=2)
 
+                        if len(self.cached) >= self.num_workers:
+                            break
+
                 if not found_tasks:
                     logger.info('Dispatcher could not pick any task for execution.')
                     # NOTE: Maintainance could be done in parallel while a task is being executed.
@@ -962,7 +966,7 @@ class Manager(cotyledon.ServiceManager):
 
         print('Deploying {} workers'.format(num_workers))
 
-        dispatcher = self.add(Dispatcher, args=(self.hashcode, queued, completed, tags, container,
+        dispatcher = self.add(Dispatcher, args=(self.hashcode, queued, completed, num_workers, tags, container,
                                                 max_tasks, depletion_patience, exhaust_wait_time))
         self.add(Worker, args=(self.hashcode, queued, completed, working_dir,
                                max_failedover_attempts),
