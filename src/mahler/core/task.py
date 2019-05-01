@@ -303,6 +303,9 @@ class Task(object):
     @property
     @cache.memoize(timeout=60)
     def metrics(self):
+        return self.get_recent_metrics()
+
+    def get_recent_metrics(self):
         # TODO: Organize by types, and sort by creation time.
         #       Make it be defaultdict(list) so that unavailable metrics can be considered as
         #       present but empty.
