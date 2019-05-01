@@ -275,7 +275,7 @@ class ResourceUsageMonitor:
         self.last_point = {'cpu': cpu_usage, 'gpu': gpu_usage}
         flattened_last_point = flatten(self.last_point)
         for key, values in self.stats.items():
-            values.append(int(flattened_last_point[key]))
+            values.append(int(flattened_last_point.get(key, 0)))
 
     def reset(self):
         self.last_point = None
