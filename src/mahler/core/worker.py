@@ -802,7 +802,7 @@ class Dispatcher(cotyledon.Service):
             'cpu.util': 100}
 
         if len(task.metrics['usage']) < 2:
-            stats.update(flatten(task.resources.get('usage')))
+            stats.update(flatten(task.resources.get('usage', {})))
         else:
             stats.update(get_max_usage(task.metrics['usage']))
 
