@@ -9,10 +9,10 @@ from mahler.core.worker import Dispatcher
 
 def operator(restore=None, resources=None, immutable=False, resumable=False):
 
-    def call(f):
+    def call(f, **kwargs):
 
         operator = mahler.core.operator.Operator(
-            f, restore=restore, resources=resources, immutable=immutable)
+            f, restore=restore, resources=resources, immutable=immutable, arguments=kwargs)
 
         return operator
 

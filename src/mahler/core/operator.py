@@ -14,7 +14,7 @@ logger = logging.getLogger('mahler.core.operator')
 
 class Operator(object):
     def __init__(self, fct, fct_signature=None, restore=None, restore_signature=None,
-                 resources=None, immutable=False, resumable=False):
+                 resources=None, arguments=None, immutable=False, resumable=False):
         if isinstance(fct, str):
             self.module_string = fct
             try:
@@ -40,6 +40,7 @@ class Operator(object):
         # self.node = DAGNode(self)
         self._restore = restore
         self._resources = resources
+        self._arguments = arguments
         self.immutable = immutable
         self.resumable = resumable
 
@@ -223,8 +224,17 @@ class Operator(object):
         # task_document = core.task.Task()
 
         # task = Task()
+    
+        if self._arguments:
+            assert all(k not in kwargs for k in self._arguments.keys())
+            kwargs.update(self._arguments)
 
         return Task(op=self, arguments=kwargs)
 
     def __call__(self, *args, **kwargs):
+
+        if self._arguments:
+            assert all(k not in kwargs for k in self._arguments.keys())
+            kwargs.update(self._arguments)
+
         return self._fct(*args, **kwargs)
