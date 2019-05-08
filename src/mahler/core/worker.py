@@ -509,7 +509,15 @@ def _main(hashcode, worker_id, queued, completed, max_failedover_attempts=3):
 
         else:
             status = task.get_recent_status()
-            assert status.name == 'Running', (task.id, status)
+            assert status.name in ['Running', 'Suspended', 'Cancelled'], (task.id, status, new_status)
+            if status.name in ['Suspended', 'Cancelled']:
+                print('Signal {status} too late')
+                message = f'Task completed before {status.name} signal was received'
+                registrar.update_status(task, mahler.core.status.OnHold(message))
+                registrar.update_status(task, mahler.core.status.Queued(message))
+                registrar.update_status(task, mahler.core.status.Reserved(message))
+                registrar.update_status(task, mahler.core.status.Running(message))
+                new_status = mahler.core.status.Completed(message)
             registrar.update_status(task, new_status)
             print('Execution of task {} stopped'.format(task.id))
             print('New status: {}'.format(new_status))
