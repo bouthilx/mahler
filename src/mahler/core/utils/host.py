@@ -226,6 +226,10 @@ def get_max_usage(metrics):
         cpu_util = usage['cpu']['total']['cpu_percent']['max']
         stats['cpu.util'] = max(stats.get('cpu.util', 0), cpu_util)
 
+    # Ugly hack to limit number of concurrent jobs and out of memory errors...
+    if 'gpu.memory' in stats:
+        stats['gpu.memory'] *= 3
+
     return stats
 
 
