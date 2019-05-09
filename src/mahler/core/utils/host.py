@@ -4,7 +4,11 @@ import os
 import platform
 import psutil
 import subprocess
-import xml.etree.ElementTree
+
+try:
+    import xml.etree.ElementTree
+except ImportError:
+    xml = None
 
 import bson
 import numpy
@@ -131,6 +135,9 @@ def fetch_host_env_vars():
 
 
 def fetch_gpus_info():
+    if xml is None:
+        return {}
+
     gpus_info = dict()
 
     try:
@@ -223,6 +230,9 @@ def get_max_usage(metrics):
 
 
 def get_gpu_usage(pid=None):
+    if xml is None:
+        return {}
+
     gpu = {}
 
     try:
