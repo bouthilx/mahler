@@ -183,13 +183,16 @@ def heartbeat(registrar, task, slept):
     # TODO: Replace this with observers on database
     #       ex: tailable cursors in MongoDB
     #       https://docs.mongodb.com/manual/core/tailable-cursors/
-    # new_status = task.status
-    # if new_status.name == 'Suspended':
-    #     raise mahler.core.utils.errors.SignalSuspend(
-    #             'Task suspended remotely: {}'.format(new_status.message))
-    # elif task.status.name == 'Cancelled':
-    #     raise mahler.core.utils.errors.SignalCancel(
-    #             'Task cancelled remotely: {}'.format(new_status.message))
+    new_status = task.get_recent_status()
+    if new_status.name == 'Suspended':
+        raise mahler.core.utils.errors.SignalSuspend(
+                'Task suspended remotely: {}'.format(new_status.message))
+    elif task.status.name == 'Cancelled':
+        raise mahler.core.utils.errors.SignalCancel(
+                'Task cancelled remotely: {}'.format(new_status.message))
+    elif task.status.name != 'Running':
+        raise mahler.core.utils.errors.SignalRaceCondition(
+                'Task lost and reserved concurrently: {}'.format(new_status))
 
     if slept < task.heartbeat:
         return False
@@ -248,7 +251,7 @@ def run(registrar, task, state, stdout, stderr):
                 except queue.Empty as e:
                     pass
 
-            time.sleep(1)
+            time.sleep(5)
             usage_monitor.update()
 
             if heartbeat(registrar, task, slept=time.time() - start):
@@ -312,6 +315,9 @@ def execute(registrar, state, task):
         registrar.set_output(task, data)
         logger.debug('Output saved')
         status = mahler.core.status.Completed('')
+        utcnow = datetime.datetime.utcnow()
+        registrar.update_stdout(task, STOPPING_TEMPLATE.format(utcnow) + "\n")
+        registrar.update_stderr(task, STOPPING_TEMPLATE.format(utcnow) + "\n")
 
     except mahler.core.utils.errors.SignalSuspend as e:
         status = mahler.core.status.Suspended('Suspended remotely (status changed to Suspended)')
@@ -340,11 +346,6 @@ def execute(registrar, state, task):
         registrar.update_stderr(task, traceback.format_exc() + "\n")
         # status = mahler.core.status.FailedOver(str(e))
         raise mahler.core.utils.errors.ExecutionError(str(e)) from e
-
-    finally:
-        utcnow = datetime.datetime.utcnow()
-        registrar.update_stdout(task, STOPPING_TEMPLATE.format(utcnow) + "\n")
-        registrar.update_stderr(task, STOPPING_TEMPLATE.format(utcnow) + "\n")
 
     # TODO
     # NOTE: storage.write adds volume links to the registry.
@@ -458,6 +459,12 @@ def _main(hashcode, worker_id, queued, completed, max_failedover_attempts=3):
             print('New status: {}'.format(status))
             continue
 
+        except mahler.core.utils.errors.SignalRaceCondition as e:
+            print('Task {} lost and reserved concurrently'.format(task.id))
+            status = task.get_recent_status()
+            print('New status: {}'.format(status))
+            continue
+
         except mahler.core.utils.errors.SignalInterruptWorker as e:
             new_status = mahler.core.status.Interrupted(str(e))
             status = task.get_recent_status()
@@ -509,7 +516,15 @@ def _main(hashcode, worker_id, queued, completed, max_failedover_attempts=3):
 
         else:
             status = task.get_recent_status()
-            assert status.name == 'Running', (task.id, status)
+            assert status.name in ['Running', 'Suspended', 'Cancelled'], (task.id, status, new_status)
+            if status.name in ['Suspended', 'Cancelled']:
+                print('Signal {status} too late')
+                message = f'Task completed before {status.name} signal was received'
+                registrar.update_status(task, mahler.core.status.OnHold(message))
+                registrar.update_status(task, mahler.core.status.Queued(message))
+                registrar.update_status(task, mahler.core.status.Reserved(message))
+                registrar.update_status(task, mahler.core.status.Running(message))
+                new_status = mahler.core.status.Completed(message)
             registrar.update_status(task, new_status)
             print('Execution of task {} stopped'.format(task.id))
             print('New status: {}'.format(new_status))
@@ -814,7 +829,7 @@ class Dispatcher(cotyledon.Service):
         return stats
 
     def have_enough(self, usage, resources):
-        return all(usage[key] * self.usage_buffer < resources[key] for key in usage.keys())
+        return all(usage[key] * self.usage_buffer <= resources[key] for key in usage.keys())
 
     def increase_usage(self, resources, usage):
         summed_resources = copy.deepcopy(resources)

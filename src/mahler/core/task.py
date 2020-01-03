@@ -280,6 +280,7 @@ class Task(object):
 
         status = mahler.core.status.build(**value)
         status.id = self._status.last_item['inc_id']
+        status.timestamp = self._status.last_item['runtime_timestamp']
         return status
 
     @property

@@ -24,6 +24,11 @@ class SignalSuspend(Exception):
     pass
 
 
+class SignalRaceCondition(Exception):
+    """If a task is being executed by two workers."""
+    pass
+
+
 class ExecutionError(Exception):
     pass
 

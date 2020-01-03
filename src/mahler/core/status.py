@@ -55,9 +55,10 @@ logger = logging.getLogger('mahler.core.status')
 class Status(object):
     heartbeat = False
 
-    def __init__(self, message, id=None):
+    def __init__(self, message, id=None, timestamp=None):
         self.id = id
         self.message = message
+        self.timestamp = timestamp
 
     @property
     def name(self):
