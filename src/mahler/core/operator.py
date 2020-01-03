@@ -1,4 +1,5 @@
 from collections import OrderedDict
+import copy
 import inspect
 import importlib
 import logging
@@ -208,6 +209,18 @@ class Operator(object):
 
         return rval
 
+    def partial(self, **kwargs):
+
+        arguments = {}
+        if self._arguments:
+            arguments.update(self._arguments)
+        arguments.update(kwargs)
+        
+        op = copy.deepcopy(self)
+        op._arguments = arguments
+
+        return op
+
     def delay(self, *args, **kwargs):
 
         self._verify_importability(self._fct)
@@ -226,8 +239,13 @@ class Operator(object):
         # task = Task()
     
         if self._arguments:
-            assert all(k not in kwargs for k in self._arguments.keys())
-            kwargs.update(self._arguments)
+            overriding_args = [k for k in self._arguments.keys() if k in kwargs]
+            if overriding_args:
+                logger.warning('Overriding {}'.format(overriding_args))
+
+            tmp_kwargs = copy.deepcopy(self._arguments)
+            tmp_kwargs.update(kwargs)
+            kwargs = tmp_kwargs
 
         return Task(op=self, arguments=kwargs)
 
