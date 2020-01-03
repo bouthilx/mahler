@@ -35,10 +35,12 @@ class Client(object):
         else:
             raise ValueError("Invalid registrar argument: {}".format(registrar))
 
-    def register(self, task, priority=0, after=None, before=None, tags=tuple(), container=None,
-                 resources=None):
+    def register(self, task, attributes=None, priority=0, after=None, before=None, tags=tuple(),
+                 container=None, resources=None):
         # TODO: Set dependencies
         task._container = container
+        if attributes:
+            task._attributes.update(attributes)
         if resources:
             task._resources.update(resources)
         self.registrar.register_tasks([task])
@@ -58,11 +60,11 @@ class Client(object):
         except StopIteration:
             return None
 
-    def find(self, id=None, tags=tuple(), container=None, status=None, host=None, _return_doc=False,
-             _projection=None):
+    def find(self, id=None, arguments=None, attributes=None, tags=tuple(), container=None,
+             status=None, host=None, _return_doc=False, _projection=None):
         return self.registrar.retrieve_tasks(
-            id=id, tags=tags, container=container, status=status, host=host,
-            _return_doc=_return_doc, _projection=_projection)
+            id=id, arguments=arguments, attributes=attributes, tags=tags, container=container,
+            status=status, host=host, _return_doc=_return_doc, _projection=_projection)
 
     def add_tags(self, task, tags, message=''):
         task = self._create_shallow_task(task)
@@ -95,6 +97,9 @@ class Client(object):
 
     def suspend(self, task, message):
         return self._update_status(task, mahler.core.status.Suspended(message))
+
+    def interrupt(self, task, message):
+        return self._update_status(task, mahler.core.status.Interrupted(message))
 
     def switchover(self, task, message):
         return self._update_status(task, mahler.core.status.SwitchedOver(message))

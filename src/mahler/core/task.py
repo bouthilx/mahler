@@ -65,10 +65,13 @@ class Task(object):
     Aggressive update schemes for up-to-date views should be used sparingly.
     """
 
-    def __init__(self, op, arguments, id=None, name=None, registrar=None, container=None, 
-                 resources=None, heartbeat=config.heartbeat):
+    def __init__(self, op, arguments, attributes=None, id=None, name=None, registrar=None,
+                 container=None, resources=None, heartbeat=config.heartbeat):
         self.op = op
         self._arguments = arguments
+        if attributes is None:
+            attributes = {}
+        self._attributes = attributes
         self._name = name
         self._parent = None
         self._dependencies = []
@@ -114,8 +117,8 @@ class Task(object):
         pass
 
     def get_offline(self):
-        return Task(self.op, self.arguments, id=self.id, name=self.name, registrar=None,
-                    container=self.container, heartbeat=self.heartbeat)
+        return Task(self.op, self.arguments, attributes=self.attributes, id=self.id, name=self.name,
+                    registrar=None, container=self.container, heartbeat=self.heartbeat)
 
     def run(self, state, stdout=sys.stdout, stderr=sys.stderr):
         if not self.is_registered:
@@ -176,6 +179,10 @@ class Task(object):
     @property
     def arguments(self):
         return self._arguments
+
+    @property
+    def attributes(self):
+        return self._attributes
 
     @property
     def resources(self):
@@ -367,6 +374,7 @@ class Task(object):
                 resources=self.resources),
             op=self.op.to_dict() if self.op else {},
             arguments=self.arguments,
+            attributes=self.attributes,
             # stdout is event-sourced
             # stderr is event-sourced
             output=self.output,

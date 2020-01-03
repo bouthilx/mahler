@@ -40,8 +40,8 @@ class RegistrarDB(object):
     def register_task(self, task):
         raise NotImplemented()
     
-    def retrieve_tasks(self, id=None, tags=tuple(), container=None, status=None, limit=None,
-                       sort=None):
+    def retrieve_tasks(self, id=None, arguments=None, attributes=None, tags=tuple(), container=None,
+                       status=None, limit=None, sort=None, host=True):
         raise NotImplemented()
 
     def add_event(self, event_type, event_object):
@@ -116,7 +116,7 @@ class Registrar(object):
 
     def maintain_unreported(self, limit=100):
 
-        projection = {'arguments': 1, 'name': 1, 'id': 1, 'op': 1,
+        projection = {'arguments': 1, 'attributes': 1, 'name': 1, 'id': 1, 'op': 1,
                       'registry': 1}
 
         # Querying from immutable cores
@@ -135,7 +135,8 @@ class Registrar(object):
             if sum(1 for _ in report_iterator) < 1:
                 logger.info('Adding missing report for {}'.format(task_document['id']))
                 operator = Operator(**task_document['op'])
-                task = Task(operator, arguments=task_document['arguments'], id=task_document['id'],
+                task = Task(operator, arguments=task_document['arguments'], 
+                            attributes=task_document['attributes'], id=task_document['id'],
                             name=task_document['name'], registrar=self)
                 task._container = task_document['registry']['container']
 
@@ -389,20 +390,22 @@ class Registrar(object):
         task_report['registry']['reported_on'] = event['id']
         self._db.update_report(task_report, update_output=update_output, upsert=upsert)
 
-    def retrieve_tasks(self, id=None, tags=tuple(), container=None, status=None, limit=None,
-                       sort=None, host=None, use_report=True, _return_doc=False, _projection=None):
+    def retrieve_tasks(self, id=None, arguments=None, attributes=None, tags=tuple(), container=None,
+                       status=None, limit=None, sort=None, host=None, use_report=True,
+                       _return_doc=False, _projection=None):
         """
         """
         task_iterator = self._db.retrieve_tasks(
-            id, tags, container, status, limit=limit, sort=sort, host=host, use_report=use_report,
-            projection=_projection)
+            id, arguments, attributes, tags, container, status, limit=limit, sort=sort, host=host,
+            use_report=use_report, projection=_projection)
         for task_document in task_iterator:
             if _return_doc:
                 yield task_document
                 continue
 
             operator = Operator(**task_document['op'])
-            task = Task(operator, arguments=task_document['arguments'], id=task_document['id'],
+            task = Task(operator, arguments=task_document['arguments'],
+                        attributes=task_document['attributes'], id=task_document['id'],
                         name=task_document['name'], registrar=self)
             task._container = task_document['registry']['container']
             yield task
@@ -561,6 +564,7 @@ def build(**kwargs):
 
     config = mahler.core.config.registry[registry_type].to_dict()
     config.update(kwargs)
+    config.pop('type', None)
     
     plugin = plugins[registry_type].load()
     registrar_db = plugin.build(**config)
