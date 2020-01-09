@@ -875,6 +875,10 @@ class Dispatcher(cotyledon.Service):
                 for usage, task in self.get_task_available():
                     found_tasks = True 
                     exhaust_failures = 0
+
+                    if len(self.cached) >= self.num_workers:
+                        break
+
                     if not self.cached or self.have_enough(usage, resources_available):
                         if self.queue(task):
                             self.shuffle = max(self.shuffle - 1, 0)
@@ -892,9 +896,6 @@ class Dispatcher(cotyledon.Service):
                         print('Dispatcher({}) task {} reserved and queued'.format(self.id, task.id))
                         logger.debug(pprint.pformat(convert_h_size(resources_available)))
                         # random_sleep(5, min_time=1, var_time=2)
-
-                        if len(self.cached) >= self.num_workers:
-                            break
 
                 if not found_tasks:
                     logger.info('Dispatcher could not pick any task for execution.')
